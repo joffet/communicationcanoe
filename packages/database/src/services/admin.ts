@@ -1,7 +1,7 @@
-import type { PlatformRole } from "../types";
+import { generateWidgetKey } from "./chat-session";
 import type { AppSupabaseClient } from "../client";
 import { createServiceClient, normalizeEmail, normalizePhone } from "../client";
-import type { Tenant, UserRow } from "../types";
+import type { PlatformRole, Tenant, UserRow } from "../types";
 
 export type AdminTenantRow = Tenant & {
   member_count: number;
@@ -92,6 +92,7 @@ export class AdminService {
         name: input.name.trim(),
         twilio_number,
         inbound_email_address,
+        chat_widget_key: generateWidgetKey(),
       })
       .select("*")
       .single();

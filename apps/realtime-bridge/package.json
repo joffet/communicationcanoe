@@ -1,0 +1,27 @@
+{
+  "name": "@communication-canoe/realtime-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc && pnpm --filter @communication-canoe/chat-widget build:copy",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@communication-canoe/database": "workspace:*",
+    "@communication-canoe/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.49.8",
+    "openai": "^4.104.0",
+    "twilio": "^5.7.0",
+    "ws": "^8.18.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.3"
+  }
+}

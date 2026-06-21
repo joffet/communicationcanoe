@@ -25,7 +25,8 @@ type DatabaseTables = {
   identity_merge_logs: TableDef<IdentityMergeLogRow, IdentityMergeLogInsert>;
   conversations: TableDef<ConversationRow, ConversationInsert>;
   messages: TableDef<MessageRow, MessageInsert>;
-  call_transfers: TableDef<CallTransferRow, CallTransferInsert>;
+  live_transfers: TableDef<LiveTransferRow, LiveTransferInsert>;
+  identity_conversion_logs: TableDef<IdentityConversionLogRow, IdentityConversionLogInsert>;
 };
 
 type TableDef<Row, Insert> = {
@@ -49,6 +50,7 @@ export type TenantRow = {
   name: string;
   twilio_number: string;
   inbound_email_address: string;
+  chat_widget_key: string;
   created_at: string;
 };
 
@@ -57,6 +59,7 @@ export type TenantInsert = {
   name: string;
   twilio_number: string;
   inbound_email_address: string;
+  chat_widget_key?: string;
   created_at?: string;
 };
 
@@ -148,6 +151,7 @@ export type IdentityRow = {
   phone: string | null;
   email: string | null;
   name: string | null;
+  is_anonymous: boolean;
   merged_into_id: string | null;
   created_at: string;
 };
@@ -158,6 +162,7 @@ export type IdentityInsert = {
   phone?: string | null;
   email?: string | null;
   name?: string | null;
+  is_anonymous?: boolean;
   merged_into_id?: string | null;
   created_at?: string;
 };
@@ -214,7 +219,7 @@ export type MessageRow = {
   id: string;
   tenant_id: string;
   conversation_id: string;
-  channel: "voice" | "sms" | "email";
+  channel: "voice" | "sms" | "email" | "web_chat";
   direction: "inbound" | "outbound";
   sender_type: "external" | "internal_user" | "ai_agent";
   sender_id: string | null;
@@ -230,7 +235,7 @@ export type MessageInsert = {
   id?: string;
   tenant_id: string;
   conversation_id: string;
-  channel: "voice" | "sms" | "email";
+  channel: "voice" | "sms" | "email" | "web_chat";
   direction: "inbound" | "outbound";
   sender_type: "external" | "internal_user" | "ai_agent";
   sender_id?: string | null;
@@ -242,24 +247,50 @@ export type MessageInsert = {
   created_at?: string;
 };
 
-export type CallTransferRow = {
+export type LiveTransferRow = {
   id: string;
   tenant_id: string;
   conversation_id: string;
   message_id: string | null;
-  attempted_user_id: string;
-  outcome: "answered" | "no_answer" | "declined";
+  channel: "voice" | "web_chat";
+  attempted_user_id: string | null;
+  outcome: "pending" | "answered" | "no_answer" | "declined";
   created_at: string;
 };
 
-export type CallTransferInsert = {
+export type LiveTransferInsert = {
   id?: string;
   tenant_id: string;
   conversation_id: string;
   message_id?: string | null;
-  attempted_user_id: string;
-  outcome: "answered" | "no_answer" | "declined";
+  channel?: "voice" | "web_chat";
+  attempted_user_id?: string | null;
+  outcome: "pending" | "answered" | "no_answer" | "declined";
   created_at?: string;
+};
+
+export type IdentityConversionLogRow = {
+  id: string;
+  tenant_id: string;
+  identity_id: string;
+  converted_at: string;
+  converted_by: "system" | "user";
+  converted_by_user_id: string | null;
+  captured_name: string | null;
+  captured_email: string | null;
+  captured_phone: string | null;
+};
+
+export type IdentityConversionLogInsert = {
+  id?: string;
+  tenant_id: string;
+  identity_id: string;
+  converted_at?: string;
+  converted_by?: "system" | "user";
+  converted_by_user_id?: string | null;
+  captured_name?: string | null;
+  captured_email?: string | null;
+  captured_phone?: string | null;
 };
 
 export type Tables<T extends keyof DatabaseTables> = DatabaseTables[T]["Row"];
@@ -269,6 +300,8 @@ export type Identity = IdentityRow;
 export type Conversation = ConversationRow;
 export type Message = MessageRow;
 export type Team = TeamRow;
+export type LiveTransfer = LiveTransferRow;
+export type IdentityConversionLog = IdentityConversionLogRow;
 
 export type ConversationWithIdentity = Conversation & {
   identity: Identity;

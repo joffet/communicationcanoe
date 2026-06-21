@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { InboxShell } from "@/components/inbox/inbox-shell";
+import { requireSession } from "@/lib/auth/session";
 import { getActiveTenantId } from "@/lib/tenant";
 import { createDomainService } from "@communication-canoe/database";
 
@@ -8,6 +9,9 @@ export default async function InboxPage({
 }: {
   searchParams: Promise<{ c?: string }>;
 }) {
+  const session = await requireSession();
+  if (!session) redirect("/login");
+
   const tenantId = await getActiveTenantId();
   if (!tenantId) {
     return (
@@ -36,6 +40,7 @@ export default async function InboxPage({
       conversations={conversations}
       selectedId={selectedId}
       thread={thread}
+      currentUserId={session.user.id}
     />
   );
 }

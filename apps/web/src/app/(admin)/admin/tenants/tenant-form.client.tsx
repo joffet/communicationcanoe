@@ -21,8 +21,17 @@ export function TenantForm({ tenant }: TenantFormProps) {
   const [inboundEmail, setInboundEmail] = useState(
     tenant?.inbound_email_address ?? "",
   );
+  const [widgetKey] = useState(tenant?.chat_widget_key ?? "");
+  const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function copyWidgetKey() {
+    if (!widgetKey) return;
+    await navigator.clipboard.writeText(widgetKey);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -88,6 +97,23 @@ export function TenantForm({ tenant }: TenantFormProps) {
           placeholder="support@example.com"
         />
       </div>
+      {isEdit && widgetKey ? (
+        <div className="space-y-2">
+          <Label htmlFor="tenant-widget-key">Chat widget key</Label>
+          <div className="flex gap-2">
+            <Input id="tenant-widget-key" value={widgetKey} readOnly disabled />
+            <Button type="button" variant="outline" onClick={() => void copyWidgetKey()}>
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </div>
+          <p className="text-xs text-zinc-500">
+            Embed:{" "}
+            <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">
+              {`<script src="${process.env.NEXT_PUBLIC_CHAT_WIDGET_URL ?? "http://localhost:3001/widget.js"}" data-widget-key="${widgetKey}"></script>`}
+            </code>
+          </p>
+        </div>
+      ) : null}
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
       <div className="flex flex-wrap gap-3">
         <Button type="submit" disabled={busy}>

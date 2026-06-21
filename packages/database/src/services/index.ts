@@ -1,10 +1,23 @@
-import type { AppendMessageInput, ConversationFilters, IdentityContact } from "@communication-canoe/shared";
+import type {
+  AppendMessageInput,
+  AnonymousIdentityInput,
+  ConvertIdentityInput,
+  ConversationFilters,
+  IdentityContact,
+  LogLiveTransferInput,
+} from "@communication-canoe/shared";
 import type { AppSupabaseClient } from "../client";
 import { createServiceClient, normalizeEmail, normalizePhone } from "../client";
+import {
+  createChatSessionToken,
+  verifyChatSessionToken,
+} from "./chat-session";
 import type {
+  Conversation,
   ConversationThread,
   ConversationWithIdentity,
   Identity,
+  LiveTransfer,
   Message,
   Team,
   Tenant,
@@ -44,6 +57,192 @@ export class DomainService {
 
     if (error) throw error;
     return data;
+  }
+
+  async resolveTenantByWidgetKey(key: string): Promise<Tenant | null> {
+    const { data, error } = await this.db
+      .from("tenants")
+      .select("*")
+      .eq("chat_widget_key", key)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
+  }
+
+  async findOrCreateAnonymousIdentity(
+    tenantId: string,
+    input: AnonymousIdentityInput,
+  ): Promise<Identity> {
+    const email = input.email ? normalizeEmail(input.email) : undefined;
+    const name = input.name?.trim() || undefined;
+
+    if (email) {
+      return this.findOrCreateIdentity(tenantId, { email, name });
+    }
+
+    const { data, error } = await this.db
+      .from("identities")
+      .insert({
+        tenant_id: tenantId,
+        phone: null,
+        email: null,
+        name: name ?? null,
+        is_anonymous: true,
+      })
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  async convertIdentity(
+    identityId: string,
+    tenantId: string,
+    input: ConvertIdentityInput,
+    convertedBy: "system" | "user" = "system",
+    convertedByUserId?: string,
+  ): Promise<Identity> {
+    const phone = input.phone ? normalizePhone(input.phone) : undefined;
+    const email = input.email ? normalizeEmail(input.email) : undefined;
+    const name = input.name?.trim() || undefined;
+
+    const { data: existing, error: fetchError } = await this.db
+      .from("identities")
+      .select("*")
+      .eq("id", identityId)
+      .eq("tenant_id", tenantId)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    const { data, error } = await this.db
+      .from("identities")
+      .update({
+        phone: phone ?? existing.phone,
+        email: email ?? existing.email,
+        name: name ?? existing.name,
+        is_anonymous: false,
+      })
+      .eq("id", identityId)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+
+    await this.db.from("identity_conversion_logs").insert({
+      tenant_id: tenantId,
+      identity_id: identityId,
+      converted_by: convertedBy,
+      converted_by_user_id: convertedByUserId ?? null,
+      captured_name: name ?? existing.name,
+      captured_email: email ?? existing.email,
+      captured_phone: phone ?? existing.phone,
+    });
+
+    return data;
+  }
+
+  async logLiveTransfer(input: LogLiveTransferInput): Promise<LiveTransfer> {
+    const { data, error } = await this.db
+      .from("live_transfers")
+      .insert({
+        tenant_id: input.tenantId,
+        conversation_id: input.conversationId,
+        channel: input.channel,
+        attempted_user_id: input.attemptedUserId ?? null,
+        message_id: input.messageId ?? null,
+        outcome: input.outcome,
+      })
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  async updateLiveTransferOutcome(
+    transferId: string,
+    outcome: LiveTransfer["outcome"],
+    attemptedUserId?: string,
+  ): Promise<LiveTransfer> {
+    const patch: Partial<LiveTransfer> = { outcome };
+    if (attemptedUserId) patch.attempted_user_id = attemptedUserId;
+
+    const { data, error } = await this.db
+      .from("live_transfers")
+      .update(patch)
+      .eq("id", transferId)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  async assignConversationUser(conversationId: string, userId: string | null) {
+    const { data, error } = await this.db
+      .from("conversations")
+      .update({ assigned_user_id: userId })
+      .eq("id", conversationId)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  createChatSessionToken(
+    tenantId: string,
+    conversationId: string,
+    identityId: string,
+  ): string {
+    return createChatSessionToken({ tenantId, conversationId, identityId });
+  }
+
+  async resumeConversationBySessionToken(
+    tenantId: string,
+    sessionToken: string,
+  ): Promise<{ conversation: Conversation; identity: Identity } | null> {
+    const payload = verifyChatSessionToken(sessionToken);
+    if (!payload || payload.tenantId !== tenantId) return null;
+
+    const thread = await this.getConversationThread(payload.conversationId);
+    if (!thread || thread.tenant_id !== tenantId) return null;
+    if (thread.status !== "open") return null;
+
+    return { conversation: thread, identity: thread.identity };
+  }
+
+  async getOnCallUsers(tenantId: string, teamId?: string | null) {
+    let teamIds: string[] = [];
+    if (teamId) {
+      teamIds = [teamId];
+    } else {
+      const teams = await this.getTeamsForTenant(tenantId);
+      teamIds = teams.map((t) => t.id);
+    }
+    if (!teamIds.length) return [];
+
+    const { data: memberships, error } = await this.db
+      .from("team_memberships")
+      .select("user_id, team_id, is_on_call")
+      .in("team_id", teamIds)
+      .eq("is_on_call", true);
+
+    if (error) throw error;
+    if (!memberships?.length) return [];
+
+    const userIds = [...new Set(memberships.map((m) => m.user_id))];
+    const { data: users, error: userError } = await this.db
+      .from("users")
+      .select("*")
+      .in("id", userIds)
+      .eq("available_for_calls", true);
+
+    if (userError) throw userError;
+    return users ?? [];
   }
 
   async findOrCreateIdentity(
@@ -392,3 +591,5 @@ export class DomainService {
 export function createDomainService(db?: AppSupabaseClient) {
   return new DomainService(db ?? createServiceClient());
 }
+
+export * from "./chat-session";

@@ -8,7 +8,8 @@
     "./ai": "./src/ai/index.ts",
     "./email": "./src/email/index.ts",
     "./schemas": "./src/schemas/index.ts",
-    "./constants": "./src/constants.ts"
+    "./constants": "./src/constants.ts",
+    "./realtime": "./src/realtime/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

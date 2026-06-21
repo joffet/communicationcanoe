@@ -1,0 +1,16 @@
+{
+  "name": "@communication-canoe/chat-widget",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "build:copy": "vite build && mkdir -p ../../apps/realtime-bridge/public && cp dist/widget.js ../../apps/realtime-bridge/public/widget.js",
+    "dev": "vite build --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^6.3.5"
+  }
+}

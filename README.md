@@ -1,17 +1,18 @@
 # Communication Canoe
 
-Multi-tenant customer enquiry platform for voice, SMS, and email — built as a pnpm monorepo with Next.js 16, Better Auth, Supabase Postgres, and Tailwind CSS.
+Multi-tenant customer enquiry platform for voice, SMS, email, and embeddable web chat — built as a pnpm monorepo with Next.js 16, Better Auth, Supabase Postgres, and Tailwind CSS.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for system design, data model, and build order.
 
 ## Structure
 
 ```text
-apps/web           Next.js dashboard, webhooks, AI routes, Better Auth
-apps/voice-bridge  Placeholder health service (real-time voice later)
-packages/database  Supabase clients and domain services
-packages/shared    Zod schemas, email parsers, AI tasks
-supabase/          Migrations, RLS backstop, seed data
+apps/web              Next.js dashboard, webhooks, AI routes, Better Auth
+apps/realtime-bridge  Realtime bridge — Twilio Media Streams + chat widget WS
+packages/chat-widget  Embeddable chat widget (built to realtime-bridge/public)
+packages/database     Supabase clients and domain services
+packages/shared       Zod schemas, email parsers, AI tasks, Realtime protocol
+supabase/             Migrations, RLS backstop, seed data
 ```
 
 ## Prerequisites
@@ -42,7 +43,8 @@ pnpm dev
 ```
 
 - Web app: http://localhost:3000
-- Voice bridge health: http://localhost:3001/health
+- Realtime bridge health: http://localhost:3001/health
+- Chat widget script: http://localhost:3001/widget.js
 
 Generate `BETTER_AUTH_SECRET`:
 
@@ -125,17 +127,17 @@ When adding a user from admin, the **Send sign-in email** toggle (default on) se
 
 | Command | Description |
 |---|---|
-| `pnpm dev` | Start web + voice-bridge |
+| `pnpm dev` | Start web + realtime-bridge |
 | `pnpm build` | Production build |
 | `pnpm --filter @communication-canoe/web auth:migrate` | Create/update Better Auth tables (uses `--yes`; requires `DATABASE_URL`) |
 | `pnpm exec supabase db push` | Push Supabase migrations to hosted project |
 
 ## Deployment Notes
 
-- **Railway:** deploy `apps/web` and `apps/voice-bridge` as separate services.
+- **Railway:** deploy `apps/web` and `apps/realtime-bridge` as separate services.
 - **Supabase:** Postgres + Realtime only; no Supabase Auth required.
 - Set `BETTER_AUTH_URL` and `NEXT_PUBLIC_APP_URL` to your production URL.
 
 ## Out of Scope (This Milestone)
 
-RLS backstop via session variables, real-time voice bridge, live call transfer, async voicemail.
+RLS backstop via session variables, async voicemail.

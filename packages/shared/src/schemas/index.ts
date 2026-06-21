@@ -30,6 +30,27 @@ export const identityContactSchema = z
     message: "At least one of phone or email is required",
   });
 
+export const anonymousIdentitySchema = z.object({
+  name: z.string().optional(),
+  email: z.string().email().optional(),
+  skipAnonymous: z.boolean().optional(),
+});
+
+export const convertIdentityInputSchema = z.object({
+  name: z.string().optional(),
+  email: z.string().email().optional(),
+  phone: z.string().optional(),
+});
+
+export const logLiveTransferInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  conversationId: z.string().uuid(),
+  channel: z.enum(["voice", "web_chat"]),
+  attemptedUserId: z.string().uuid().optional(),
+  messageId: z.string().uuid().optional(),
+  outcome: z.enum(["pending", "answered", "no_answer", "declined"]),
+});
+
 export const conversationFiltersSchema = z.object({
   status: z.enum(CONVERSATION_STATUSES).optional(),
   assignedTeamId: z.string().uuid().optional(),
@@ -38,4 +59,7 @@ export const conversationFiltersSchema = z.object({
 
 export type AppendMessageInput = z.infer<typeof appendMessageInputSchema>;
 export type IdentityContact = z.infer<typeof identityContactSchema>;
+export type AnonymousIdentityInput = z.infer<typeof anonymousIdentitySchema>;
+export type ConvertIdentityInput = z.infer<typeof convertIdentityInputSchema>;
+export type LogLiveTransferInput = z.infer<typeof logLiveTransferInputSchema>;
 export type ConversationFilters = z.infer<typeof conversationFiltersSchema>;

@@ -4,19 +4,21 @@
 --   UPDATE users SET platform_role = 'super_admin' WHERE email = 'you@example.com';
 -- Or set SUPER_ADMIN_EMAILS=you@example.com in apps/web/.env.local before signing in.
 
-INSERT INTO tenants (id, name, twilio_number, inbound_email_address)
+INSERT INTO tenants (id, name, twilio_number, inbound_email_address, chat_widget_key)
 VALUES
   (
     '11111111-1111-1111-1111-111111111111',
     'Acme Support',
     '+15551234567',
-    'support@acme.example'
+    'support@acme.example',
+    'acme-widget-key-dev'
   ),
   (
     '22222222-2222-2222-2222-222222222222',
     'Beta Retail',
     '+15559876543',
-    'help@beta.example'
+    'help@beta.example',
+    'beta-widget-key-dev'
   );
 
 INSERT INTO tenant_settings (tenant_id, greeting_message, business_hours, faq_snippets)
