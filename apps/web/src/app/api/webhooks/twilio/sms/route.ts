@@ -1,5 +1,5 @@
 import twilio from "twilio";
-import { createDomainService } from "@contact/database";
+import { createDomainService } from "@communication-canoe/database";
 import { triggerConversationRouting } from "@/lib/ai/routing";
 
 function validateTwilioSignature(

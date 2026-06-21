@@ -1,5 +1,5 @@
 import { assertConversationAccess } from "@/lib/auth/access";
-import { summarizeConversation } from "@contact/shared/ai";
+import { summarizeConversation } from "@communication-canoe/shared/ai";
 
 export async function POST(
   _request: Request,

@@ -1,4 +1,4 @@
-import type { AppendMessageInput, ConversationFilters, IdentityContact } from "@contact/shared";
+import type { AppendMessageInput, ConversationFilters, IdentityContact } from "@communication-canoe/shared";
 import type { AppSupabaseClient } from "../client";
 import { createServiceClient, normalizeEmail, normalizePhone } from "../client";
 import type {

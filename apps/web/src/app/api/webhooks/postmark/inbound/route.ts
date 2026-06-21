@@ -1,5 +1,5 @@
-import { createDomainService } from "@contact/database";
-import { parsePostmarkInbound } from "@contact/shared/email";
+import { createDomainService } from "@communication-canoe/database";
+import { parsePostmarkInbound } from "@communication-canoe/shared/email";
 import { triggerConversationRouting } from "@/lib/ai/routing";
 
 function verifyPostmarkWebhook(request: Request): boolean {

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import type { ConversationThread, ConversationWithIdentity } from "@contact/database";
+import type { ConversationThread, ConversationWithIdentity } from "@communication-canoe/database";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

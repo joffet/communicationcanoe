@@ -1,5 +1,5 @@
 {
-  "name": "contact",
+  "name": "communication-canoe",
   "private": true,
   "scripts": {
     "dev": "turbo dev",

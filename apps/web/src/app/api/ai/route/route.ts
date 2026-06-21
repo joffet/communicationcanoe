@@ -1,5 +1,5 @@
-import { createDomainService } from "@contact/database";
-import { routeConversation } from "@contact/shared/ai";
+import { createDomainService } from "@communication-canoe/database";
+import { routeConversation } from "@communication-canoe/shared/ai";
 
 function verifyInternalSecret(request: Request): boolean {
   const secret = process.env.INTERNAL_API_SECRET;

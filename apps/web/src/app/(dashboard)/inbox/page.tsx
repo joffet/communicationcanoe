@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { InboxShell } from "@/components/inbox/inbox-shell";
 import { getActiveTenantId } from "@/lib/tenant";
-import { createDomainService } from "@contact/database";
+import { createDomainService } from "@communication-canoe/database";
 
 export default async function InboxPage({
   searchParams,

@@ -3,7 +3,12 @@ import { redirect } from "next/navigation";
 import { TenantSwitcher } from "@/components/tenant-switcher";
 import { SignOutButton } from "@/components/sign-out-button";
 import { Separator } from "@/components/ui/separator";
-import { getActiveTenantId, getSessionUser, getUserMemberships } from "@/lib/tenant";
+import {
+  getActiveTenantId,
+  getIsSuperAdmin,
+  getSessionUser,
+  getUserMemberships,
+} from "@/lib/tenant";
 
 export default async function DashboardLayout({
   children,
@@ -16,13 +21,14 @@ export default async function DashboardLayout({
   const memberships = await getUserMemberships();
   const activeTenantId = await getActiveTenantId();
   const tenants = memberships.map((m) => m.tenant);
+  const isSuperAdmin = await getIsSuperAdmin();
 
   return (
     <div className="flex min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <aside className="flex w-64 shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         <div className="px-4 py-5">
           <Link href="/inbox" className="text-lg font-semibold tracking-tight">
-            Contact
+            Communication Canoe
           </Link>
           <p className="mt-1 text-xs text-zinc-500">Customer inbox</p>
         </div>
@@ -48,6 +54,14 @@ export default async function DashboardLayout({
           >
             Inbox
           </Link>
+          {isSuperAdmin ? (
+            <Link
+              href="/admin"
+              className="rounded-md px-3 py-2 font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              Admin
+            </Link>
+          ) : null}
         </nav>
         <div className="mt-auto space-y-2 border-t border-zinc-200 p-4 dark:border-zinc-800">
           <p className="text-xs text-zinc-500">{user.email}</p>

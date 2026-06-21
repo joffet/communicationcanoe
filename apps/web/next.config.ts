@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@contact/database", "@contact/shared"],
+  transpilePackages: ["@communication-canoe/database", "@communication-canoe/shared"],
 };
 
 export default nextConfig;

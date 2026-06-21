@@ -78,12 +78,15 @@ export type TenantSettingsInsert = {
   updated_at?: string;
 };
 
+export type PlatformRole = "user" | "super_admin";
+
 export type UserRow = {
   id: string;
   name: string | null;
   email: string;
   phone_number: string | null;
   available_for_calls: boolean;
+  platform_role: PlatformRole;
   created_at: string;
 };
 
@@ -93,6 +96,7 @@ export type UserInsert = {
   email: string;
   phone_number?: string | null;
   available_for_calls?: boolean;
+  platform_role?: PlatformRole;
   created_at?: string;
 };
 

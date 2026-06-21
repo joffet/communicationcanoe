@@ -1,6 +1,8 @@
-# Customer Interaction Platform
+# Communication Canoe
 
 Multi-tenant customer enquiry platform for voice, SMS, and email — built as a pnpm monorepo with Next.js 16, Better Auth, Supabase Postgres, and Tailwind CSS.
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for system design, data model, and build order.
 
 ## Structure
 
@@ -31,7 +33,7 @@ pnpm exec supabase link --project-ref YOUR_PROJECT_REF
 pnpm exec supabase db push
 
 # Create Better Auth tables (user, session, account, verification)
-pnpm --filter @contact/web auth:migrate
+pnpm --filter @communication-canoe/web auth:migrate
 
 # Optional: seed sample tenants/conversations
 pnpm exec supabase db query --linked --file supabase/seed.sql
@@ -68,7 +70,39 @@ Magic links send from `info@communicationcanoe.com` by default. Tenant-scoped ou
 
 **Tenant isolation** is enforced in application code: every dashboard/API route verifies session + `user_tenant_memberships` before querying with an explicit `tenant_id`. Postgres RLS remains as a future backstop.
 
-## Webhooks
+## Super Admin and Platform Admin
+
+Platform operators use the **`super_admin`** role on `public.users` (`platform_role` column). Super admins can:
+
+- Open `/admin` (dashboard, tenants, users)
+- Access any tenant's inbox without explicit membership
+- Create tenants, invite users, and manage tenant memberships
+
+**Bootstrap your first super admin** (pick one):
+
+1. **Env var** — add to `apps/web/.env.local` before first login:
+   ```bash
+   SUPER_ADMIN_EMAILS=you@company.com
+   ```
+2. **SQL** — after signing in once:
+   ```sql
+   UPDATE users SET platform_role = 'super_admin' WHERE email = 'you@company.com';
+   ```
+
+Admin routes:
+
+| Route | Purpose |
+|---|---|
+| `/admin` | Dashboard (counts + quick links) |
+| `/admin/tenants` | Tenant list with sort, filter, search |
+| `/admin/tenants/new` | Create tenant |
+| `/admin/tenants/[id]/edit` | Edit tenant |
+| `/admin/users` | User list with sort, filter, search |
+| `/admin/users/new` | Create user + optional magic-link invite |
+| `/admin/users/[id]/edit` | Edit user, super-admin flag, memberships |
+
+When adding a user from admin, the **Send sign-in email** toggle (default on) sends a styled HTML magic-link invite via SES.
+
 
 ### Twilio SMS
 
@@ -93,7 +127,7 @@ Magic links send from `info@communicationcanoe.com` by default. Tenant-scoped ou
 |---|---|
 | `pnpm dev` | Start web + voice-bridge |
 | `pnpm build` | Production build |
-| `pnpm --filter @contact/web auth:migrate` | Create/update Better Auth tables (uses `--yes`; requires `DATABASE_URL`) |
+| `pnpm --filter @communication-canoe/web auth:migrate` | Create/update Better Auth tables (uses `--yes`; requires `DATABASE_URL`) |
 | `pnpm exec supabase db push` | Push Supabase migrations to hosted project |
 
 ## Deployment Notes

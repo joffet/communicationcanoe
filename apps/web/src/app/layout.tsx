@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Contact — Customer Interaction Platform",
+  title: "Communication Canoe",
   description: "Multi-tenant inbox for voice, SMS, and email",
 };
 

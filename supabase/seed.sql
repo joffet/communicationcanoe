@@ -1,4 +1,8 @@
 -- Dev seed data (tenants, teams — users created via auth signup in dev)
+--
+-- After first login, promote a user to platform super admin:
+--   UPDATE users SET platform_role = 'super_admin' WHERE email = 'you@example.com';
+-- Or set SUPER_ADMIN_EMAILS=you@example.com in apps/web/.env.local before signing in.
 
 INSERT INTO tenants (id, name, twilio_number, inbound_email_address)
 VALUES

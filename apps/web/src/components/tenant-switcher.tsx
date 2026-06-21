@@ -1,6 +1,6 @@
 "use client";
 
-import { TENANT_COOKIE } from "@contact/shared/constants";
+import { TENANT_COOKIE } from "@communication-canoe/shared/constants";
 import { useRouter } from "next/navigation";
 
 export function TenantSwitcher({

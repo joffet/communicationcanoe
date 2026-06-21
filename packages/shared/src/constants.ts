@@ -8,4 +8,4 @@ export type MessageChannel = (typeof MESSAGE_CHANNELS)[number];
 export type MessageDirection = (typeof MESSAGE_DIRECTIONS)[number];
 export type SenderType = (typeof SENDER_TYPES)[number];
 
-export const TENANT_COOKIE = "contact-tenant-id";
+export const TENANT_COOKIE = "canoe-tenant-id";

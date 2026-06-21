@@ -1,5 +1,5 @@
 import { assertConversationAccess } from "@/lib/auth/access";
-import { suggestReply } from "@contact/shared/ai";
+import { suggestReply } from "@communication-canoe/shared/ai";
 
 export async function GET(
   _request: Request,
