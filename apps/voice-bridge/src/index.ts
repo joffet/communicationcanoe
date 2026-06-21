@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 
-const port = Number(process.env.PORT ?? 3001);
+const port = Number(process.env.VOICE_BRIDGE_PORT ?? 3001);
 
 const server = createServer((req, res) => {
   if (req.url === "/health" && req.method === "GET") {

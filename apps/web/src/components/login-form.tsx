@@ -1,34 +1,51 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { useSearchParams } from "next/navigation";
+import { authClient } from "@/lib/auth/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export function LoginForm() {
-  const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
-    const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    const redirect = searchParams.get("redirect") ?? "/inbox";
+    const { error: signInError } = await authClient.signIn.magicLink({
+      email,
+      callbackURL: redirect,
+    });
 
     if (signInError) {
-      setError(signInError.message);
+      setError(signInError.message ?? "Could not send sign-in link");
       setLoading(false);
       return;
     }
 
-    router.push("/inbox");
-    router.refresh();
+    setSent(true);
+    setLoading(false);
+  }
+
+  if (sent) {
+    return (
+      <div className="flex w-full max-w-sm flex-col gap-3">
+        <p className="text-sm text-zinc-600 dark:text-zinc-300">
+          Check your email for a sign-in link sent to <strong>{email}</strong>.
+        </p>
+        <p className="text-xs text-zinc-500">The link expires in 5 minutes.</p>
+        <Button type="button" variant="outline" onClick={() => setSent(false)}>
+          Use a different email
+        </Button>
+      </div>
+    );
   }
 
   return (
@@ -40,26 +57,15 @@ export function LoginForm() {
         <Input
           id="email"
           type="email"
+          autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
         />
       </div>
-      <div className="space-y-2">
-        <label className="text-sm font-medium" htmlFor="password">
-          Password
-        </label>
-        <Input
-          id="password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-      </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
       <Button type="submit" disabled={loading}>
-        {loading ? "Signing in…" : "Sign in"}
+        {loading ? "Sending link…" : "Email me a sign-in link"}
       </Button>
     </form>
   );

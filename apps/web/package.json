@@ -7,17 +7,20 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "auth:migrate": "better-auth migrate --config ./src/lib/auth/server.ts --yes"
   },
   "dependencies": {
+    "@aws-sdk/client-ses": "^3.1073.0",
     "@contact/database": "workspace:*",
     "@contact/shared": "workspace:*",
-    "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.49.8",
+    "better-auth": "1.4.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.511.0",
     "next": "16.2.9",
+    "pg": "^8.22.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "tailwind-merge": "^3.3.0",
@@ -25,8 +28,10 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
+    "@better-auth/cli": "^1.4.21",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

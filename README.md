@@ -1,117 +1,107 @@
 # Customer Interaction Platform
 
-Multi-tenant customer enquiry platform for voice, SMS, and email — built as a pnpm monorepo with Next.js 16, Supabase, and Tailwind CSS.
+Multi-tenant customer enquiry platform for voice, SMS, and email — built as a pnpm monorepo with Next.js 16, Better Auth, Supabase Postgres, and Tailwind CSS.
 
 ## Structure
 
 ```text
-apps/web           Next.js dashboard, webhooks, AI routes
+apps/web           Next.js dashboard, webhooks, AI routes, Better Auth
 apps/voice-bridge  Placeholder health service (real-time voice later)
 packages/database  Supabase clients and domain services
 packages/shared    Zod schemas, email parsers, AI tasks
-supabase/          Migrations, RLS, seed data
+supabase/          Migrations, RLS backstop, seed data
 ```
 
 ## Prerequisites
 
 - Node.js 20+
 - pnpm 9+ (`corepack enable`)
-- [Supabase CLI](https://supabase.com/docs/guides/cli) (via `pnpm exec supabase` or global install)
-- Docker (for local Supabase)
+- Hosted [Supabase](https://supabase.com) project (Postgres + Realtime) **or** local Supabase via Docker
 
-## Quick Start
+## Quick Start (Hosted Supabase)
 
 ```bash
-# Install dependencies
 pnpm install
-
-# Copy env and fill in Supabase keys after `supabase start`
 cp .env.example apps/web/.env.local
+# Fill in: Supabase URL/keys, DATABASE_URL, BETTER_AUTH_SECRET
 
-# Start local Supabase (Postgres, Auth, Realtime)
-pnpm db:start
+# Link and push app migrations
+pnpm exec supabase login
+pnpm exec supabase link --project-ref YOUR_PROJECT_REF
+pnpm exec supabase db push
 
-# Apply migrations + seed
-pnpm db:reset
+# Create Better Auth tables (user, session, account, verification)
+pnpm --filter @contact/web auth:migrate
 
-# Copy keys from `supabase status` into apps/web/.env.local
-pnpm exec supabase status
+# Optional: seed sample tenants/conversations
+pnpm exec supabase db query --linked --file supabase/seed.sql
 
-# Start all apps
 pnpm dev
 ```
 
 - Web app: http://localhost:3000
 - Voice bridge health: http://localhost:3001/health
-- Supabase Studio: http://127.0.0.1:54323
+
+Generate `BETTER_AUTH_SECRET`:
+
+```bash
+openssl rand -base64 32
+```
+
+Get `DATABASE_URL` from Supabase Dashboard → **Connect** → ORMs / URI (use the **pooler** connection string on port 6543 for serverless/Railway).
 
 ## Auth and Tenant Access
 
-1. Open Supabase Studio → Authentication → create a user (email/password).
-2. Note the user's UUID from `auth.users`.
-3. Insert a membership (replace `YOUR_USER_ID`):
+Auth runs via **Better Auth** (magic link only) inside the Next.js app — not Supabase Auth. Outbound email uses **Amazon SES**.
+
+1. Sign in at `/login` — enter your email and open the magic link (creates Better Auth user + `public.users` on first sign-in).
+2. Grant tenant access in **SQL Editor** (replace `YOUR_USER_ID` with the Better Auth user id):
 
 ```sql
-INSERT INTO users (id, email, name)
-VALUES ('YOUR_USER_ID', 'you@example.com', 'You')
-ON CONFLICT (id) DO NOTHING;
-
 INSERT INTO user_tenant_memberships (user_id, tenant_id, role)
 VALUES ('YOUR_USER_ID', '11111111-1111-1111-1111-111111111111', 'admin');
 ```
 
-4. Sign in at `/login` and open `/inbox`.
+3. Open `/inbox`.
 
-Seed data includes tenant **Acme Support** with a sample SMS conversation (visible via service-role webhook path; inbox requires membership above).
+Magic links send from `info@communicationcanoe.com` by default. Tenant-scoped outbound email uses each tenant's `inbound_email_address` when available (must be verified in SES).
+
+**Tenant isolation** is enforced in application code: every dashboard/API route verifies session + `user_tenant_memberships` before querying with an explicit `tenant_id`. Postgres RLS remains as a future backstop.
 
 ## Webhooks
 
 ### Twilio SMS
 
 - URL: `POST {NEXT_PUBLIC_APP_URL}/api/webhooks/twilio/sms`
-- Configure on your Twilio number's messaging webhook.
-- Resolves tenant by `To` number, creates identity/conversation/message.
 - Validates `X-Twilio-Signature` when `TWILIO_AUTH_TOKEN` is set.
-
-Local testing with ngrok:
-
-```bash
-ngrok http 3000
-# Set NEXT_PUBLIC_APP_URL to the ngrok HTTPS URL
-```
 
 ### Postmark Inbound
 
 - URL: `POST {NEXT_PUBLIC_APP_URL}/api/webhooks/postmark/inbound`
-- Set inbound domain address to match tenant `inbound_email_address` (seed: `support@acme.example`).
-- Optional: set `POSTMARK_INBOUND_WEBHOOK_SECRET` and send header `X-Postmark-Webhook-Secret`.
 
 ## AI Features
 
 | Feature | Endpoint | Notes |
 |---|---|---|
-| Routing | Auto on inbound SMS/email | Assigns `assigned_team_id` via `/api/ai/route` logic |
+| Routing | Auto on inbound SMS/email | Assigns `assigned_team_id` |
 | Summarize | `POST /api/conversations/:id/summarize` | Inbox UI button |
-| Suggest reply | `GET /api/conversations/:id/suggest-reply` | Draft only, never auto-sent |
-
-Set `AI_PROVIDER=openai` or `anthropic` and the corresponding API key. Without keys, stub responses are returned for local development.
+| Suggest reply | `GET /api/conversations/:id/suggest-reply` | Draft only |
 
 ## Scripts
 
 | Command | Description |
 |---|---|
-| `pnpm dev` | Start web + voice-bridge via Turborepo |
+| `pnpm dev` | Start web + voice-bridge |
 | `pnpm build` | Production build |
-| `pnpm db:start` | Start local Supabase |
-| `pnpm db:reset` | Reset DB, run migrations + seed |
-| `pnpm db:types` | Regenerate TypeScript types from local schema |
+| `pnpm --filter @contact/web auth:migrate` | Create/update Better Auth tables (uses `--yes`; requires `DATABASE_URL`) |
+| `pnpm exec supabase db push` | Push Supabase migrations to hosted project |
 
 ## Deployment Notes
 
-- **Railway:** deploy `apps/web` and `apps/voice-bridge` as separate services in one project.
-- **Supabase:** hosted Postgres/Auth/Realtime separate from Railway.
-- Use `SUPABASE_SERVICE_ROLE_KEY` only on the server (webhooks, AI writes after tenant resolution).
+- **Railway:** deploy `apps/web` and `apps/voice-bridge` as separate services.
+- **Supabase:** Postgres + Realtime only; no Supabase Auth required.
+- Set `BETTER_AUTH_URL` and `NEXT_PUBLIC_APP_URL` to your production URL.
 
 ## Out of Scope (This Milestone)
 
-Real-time voice bridge, live call transfer, async voicemail, rate limiting, Railway config files.
+RLS backstop via session variables, real-time voice bridge, live call transfer, async voicemail.

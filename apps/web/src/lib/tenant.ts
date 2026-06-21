@@ -1,18 +1,14 @@
 import { TENANT_COOKIE } from "@contact/shared/constants";
 import { cookies } from "next/headers";
-import { createClient } from "@/lib/supabase/server";
 import { createDomainService } from "@contact/database";
+import { requireSession } from "@/lib/auth/session";
 
 export async function getActiveTenantId(): Promise<string | null> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) return null;
+  const session = await requireSession();
+  if (!session) return null;
 
   const domain = createDomainService();
-  const memberships = await domain.getUserTenants(user.id);
+  const memberships = await domain.getUserTenants(session.user.id);
   if (memberships.length === 0) return null;
 
   const cookieStore = await cookies();
@@ -25,12 +21,14 @@ export async function getActiveTenantId(): Promise<string | null> {
 }
 
 export async function getUserMemberships() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return [];
+  const session = await requireSession();
+  if (!session) return [];
 
   const domain = createDomainService();
-  return domain.getUserTenants(user.id);
+  return domain.getUserTenants(session.user.id);
+}
+
+export async function getSessionUser() {
+  const session = await requireSession();
+  return session?.user ?? null;
 }

@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import type { ConversationThread, ConversationWithIdentity, Message } from "@contact/database";
+import type { ConversationThread, ConversationWithIdentity } from "@contact/database";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ConversationPresence } from "@/components/inbox/conversation-presence";
-import { createClient } from "@/lib/supabase/client";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 export function InboxShell({
@@ -22,6 +22,7 @@ export function InboxShell({
   selectedId: string | null;
   thread: ConversationThread | null;
 }) {
+  const router = useRouter();
   const [conversations, setConversations] = useState(initialConversations);
   const [thread, setThread] = useState(initialThread);
   const [draft, setDraft] = useState<string | null>(null);
@@ -33,54 +34,13 @@ export function InboxShell({
     setThread(initialThread);
   }, [initialConversations, initialThread]);
 
+  // Poll for updates — postgres_changes requires Supabase Auth JWT; Better Auth uses app-layer refresh instead.
   useEffect(() => {
-    const supabase = createClient();
-
-    const convChannel = supabase
-      .channel(`tenant-${tenantId}-conversations`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "conversations", filter: `tenant_id=eq.${tenantId}` },
-        () => {
-          window.location.reload();
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(convChannel);
-    };
-  }, [tenantId]);
-
-  useEffect(() => {
-    if (!selectedId) return;
-
-    const supabase = createClient();
-    const msgChannel = supabase
-      .channel(`conversation-${selectedId}-messages`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-          filter: `conversation_id=eq.${selectedId}`,
-        },
-        (payload) => {
-          const newMessage = payload.new as Message;
-          setThread((prev) =>
-            prev
-              ? { ...prev, messages: [...prev.messages, newMessage] }
-              : prev,
-          );
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(msgChannel);
-    };
-  }, [selectedId]);
+    const interval = setInterval(() => {
+      router.refresh();
+    }, 15_000);
+    return () => clearInterval(interval);
+  }, [router]);
 
   async function loadSuggestion() {
     if (!selectedId) return;

@@ -1,20 +1,16 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { TenantSwitcher } from "@/components/tenant-switcher";
+import { SignOutButton } from "@/components/sign-out-button";
 import { Separator } from "@/components/ui/separator";
-import { getActiveTenantId, getUserMemberships } from "@/lib/tenant";
-import { createClient } from "@/lib/supabase/server";
+import { getActiveTenantId, getSessionUser, getUserMemberships } from "@/lib/tenant";
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
   const memberships = await getUserMemberships();
@@ -35,11 +31,13 @@ export default async function DashboardLayout({
           <p className="mb-2 px-3 text-xs font-medium uppercase tracking-wide text-zinc-400">
             Tenant
           </p>
-          {activeTenantId && (
+          {activeTenantId && tenants.length > 0 ? (
             <TenantSwitcher
               tenants={tenants.map((t) => ({ id: t.id, name: t.name }))}
               activeTenantId={activeTenantId}
             />
+          ) : (
+            <p className="px-3 text-xs text-zinc-500">No tenant assigned</p>
           )}
         </div>
         <Separator />
@@ -51,8 +49,9 @@ export default async function DashboardLayout({
             Inbox
           </Link>
         </nav>
-        <div className="mt-auto border-t border-zinc-200 p-4 text-xs text-zinc-500 dark:border-zinc-800">
-          {user.email}
+        <div className="mt-auto space-y-2 border-t border-zinc-200 p-4 dark:border-zinc-800">
+          <p className="text-xs text-zinc-500">{user.email}</p>
+          <SignOutButton />
         </div>
       </aside>
       <main className="flex min-w-0 flex-1 flex-col">{children}</main>
