@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import type { AdminUserRow } from "@communication-canoe/database";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,

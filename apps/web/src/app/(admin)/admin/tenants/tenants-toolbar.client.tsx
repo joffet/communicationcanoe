@@ -10,11 +10,11 @@ import {
 } from "@/components/admin/search-toolbar-button";
 import { SortByControl } from "@/components/admin/sort-by-control";
 import { adminPageTitleClassName } from "@/components/admin/admin-table-layout";
-import type { SortConfig, TenantsSortField } from "./tenants.utils";
+import type { TenantsSortField } from "./tenants.utils";
 
 type TenantsToolbarProps = {
-  sortConfig: SortConfig;
-  onSortChange: Dispatch<SetStateAction<SortConfig>>;
+  sortConfig: SortConfig<TenantsSortField>;
+  onSortChange: Dispatch<SetStateAction<SortConfig<TenantsSortField>>>;
   nonDefaultFilterCount: number;
   onOpenFilter: () => void;
   searchOpen: boolean;

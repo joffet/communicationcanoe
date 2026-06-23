@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import type { AdminTenantRow } from "@communication-canoe/database";
 import {
   Table,
   TableBody,

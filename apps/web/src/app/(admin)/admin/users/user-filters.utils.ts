@@ -1,5 +1,3 @@
-import type { AdminUserRow } from "@communication-canoe/database";
-
 export type UsersFilterState = {
   showSuperAdmins: boolean;
   showRegularUsers: boolean;

@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import type { AdminTenantRow } from "@communication-canoe/database";
 import {
   adminSearchToolbarIconToggle,
   shouldRunAdminSearch,
@@ -19,7 +18,7 @@ import {
   DEFAULT_TENANTS_SORT,
   sortTenants,
   tenantMatchesSearch,
-  type SortConfig,
+  type TenantsSortField,
 } from "./tenants.utils";
 
 type TenantsViewAllProps = {
@@ -27,7 +26,7 @@ type TenantsViewAllProps = {
 };
 
 export function TenantsViewAll({ tenants }: TenantsViewAllProps) {
-  const [sortConfig, setSortConfig] = useState<SortConfig>(DEFAULT_TENANTS_SORT);
+  const [sortConfig, setSortConfig] = useState<SortConfig<TenantsSortField>>(DEFAULT_TENANTS_SORT);
   const [filterOpen, setFilterOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchInput, setSearchInput] = useState("");

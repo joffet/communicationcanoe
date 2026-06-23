@@ -1,18 +1,11 @@
-import type { AdminUserRow } from "@communication-canoe/database";
-
 export type UsersSortField = "name" | "email" | "created_at" | "platform_role";
 
-export type SortConfig = {
-  field: UsersSortField;
-  direction: "asc" | "desc";
-};
-
-export const DEFAULT_USERS_SORT: SortConfig = {
+export const DEFAULT_USERS_SORT: SortConfig<UsersSortField> = {
   field: "email",
   direction: "asc",
 };
 
-export function sortUsers(users: AdminUserRow[], config: SortConfig): AdminUserRow[] {
+export function sortUsers(users: AdminUserRow[], config: SortConfig<UsersSortField>): AdminUserRow[] {
   const sorted = [...users];
   const dir = config.direction === "asc" ? 1 : -1;
 

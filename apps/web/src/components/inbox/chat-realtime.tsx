@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { createRealtimeClient } from "@/lib/supabase/realtime";
-import type { ChatBroadcastNeedsHuman } from "@communication-canoe/shared/realtime";
 
 export function useNeedsHumanConversations(tenantId: string) {
   const [needsHuman, setNeedsHuman] = useState<Set<string>>(new Set());

@@ -1,20 +1,13 @@
-import type { AdminTenantRow } from "@communication-canoe/database";
-
 export type TenantsSortField = "name" | "created_at" | "member_count";
 
-export type SortConfig = {
-  field: TenantsSortField;
-  direction: "asc" | "desc";
-};
-
-export const DEFAULT_TENANTS_SORT: SortConfig = {
+export const DEFAULT_TENANTS_SORT: SortConfig<TenantsSortField> = {
   field: "name",
   direction: "asc",
 };
 
 export function sortTenants(
   tenants: AdminTenantRow[],
-  config: SortConfig,
+  config: SortConfig<TenantsSortField>,
 ): AdminTenantRow[] {
   const sorted = [...tenants];
   const dir = config.direction === "asc" ? 1 : -1;

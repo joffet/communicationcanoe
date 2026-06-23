@@ -1,5 +1,3 @@
-import type { AdminTenantRow } from "@communication-canoe/database";
-
 export type TenantsFilterState = {
   showHasMembers: boolean;
   showNoMembers: boolean;

@@ -11,4 +11,3 @@ export async function requireSession() {
   return session;
 }
 
-export type AppSession = NonNullable<Awaited<ReturnType<typeof requireSession>>>;

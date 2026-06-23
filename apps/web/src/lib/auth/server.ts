@@ -2,7 +2,6 @@ import { betterAuth } from "better-auth";
 import { admin } from "better-auth/plugins";
 import { magicLink } from "better-auth/plugins";
 import { Pool } from "pg";
-import type { PlatformRole } from "@communication-canoe/database";
 import { sendMagicLinkEmail } from "@/lib/email/magic-link";
 import { consumeInviteEmailVariant } from "@/lib/email/invite-email-context";
 

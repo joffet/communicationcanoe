@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import type { AdminUserRow } from "@communication-canoe/database";
 import {
   adminSearchToolbarIconToggle,
   shouldRunAdminSearch,
@@ -19,7 +18,7 @@ import {
   DEFAULT_USERS_SORT,
   sortUsers,
   userMatchesSearch,
-  type SortConfig,
+  type UsersSortField,
 } from "./users.utils";
 
 type UsersViewAllProps = {
@@ -27,7 +26,7 @@ type UsersViewAllProps = {
 };
 
 export function UsersViewAll({ users }: UsersViewAllProps) {
-  const [sortConfig, setSortConfig] = useState<SortConfig>(DEFAULT_USERS_SORT);
+  const [sortConfig, setSortConfig] = useState<SortConfig<UsersSortField>>(DEFAULT_USERS_SORT);
   const [filterOpen, setFilterOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchInput, setSearchInput] = useState("");

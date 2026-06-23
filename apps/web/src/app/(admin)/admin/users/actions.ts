@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import type { UserMembershipInput } from "@communication-canoe/database";
 import { requireSuperAdminAction } from "@/lib/auth/access";
 import { invitePlatformUser } from "@/lib/auth/invite-user";
 

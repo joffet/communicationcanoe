@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { AdminUserRow, Tenant } from "@communication-canoe/database";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,17 +16,12 @@ import {
 } from "@/components/ui/select";
 import { createUserAction, updateUserAction } from "./actions";
 
-type MembershipRow = {
-  tenant_id: string;
-  role: "admin" | "member";
-};
-
 type UserFormProps = {
   user?: AdminUserRow | null;
   tenants: Pick<Tenant, "id" | "name">[];
 };
 
-function membershipsFromUser(user?: AdminUserRow | null): MembershipRow[] {
+function membershipsFromUser(user?: AdminUserRow | null): UserMembershipInput[] {
   if (!user) return [];
   return user.memberships.map((m) => ({
     tenant_id: m.tenant_id,
@@ -48,7 +42,7 @@ export function UserForm({ user, tenants }: UserFormProps) {
     user?.platform_role === "super_admin",
   );
   const [sendInvite, setSendInvite] = useState(true);
-  const [memberships, setMemberships] = useState<MembershipRow[]>(
+  const [memberships, setMemberships] = useState<UserMembershipInput[]>(
     membershipsFromUser(user),
   );
   const [busy, setBusy] = useState(false);
@@ -68,7 +62,7 @@ export function UserForm({ user, tenants }: UserFormProps) {
 
   function updateMembership(
     index: number,
-    patch: Partial<MembershipRow>,
+    patch: Partial<UserMembershipInput>,
   ) {
     setMemberships((prev) =>
       prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
