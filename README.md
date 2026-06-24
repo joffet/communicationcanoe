@@ -42,6 +42,8 @@ pnpm exec supabase db query --linked --file supabase/seed.sql
 pnpm dev
 ```
 
+**Better Auth and RLS:** Better Auth creates `"user"`, `"session"`, `"account"`, and `"verification"` in the exposed `public` schema (emails, session tokens, passwords). Run `supabase db push` **before** `auth:migrate` on a fresh project so the RLS migration and auto-RLS event trigger are in place first; new Better Auth tables then get RLS automatically. If you already ran `auth:migrate`, run `supabase db push` to lock down existing auth tables. Better Auth itself uses `DATABASE_URL` (postgres role), not the anon key — RLS only blocks PostgREST/API access.
+
 - Web app: http://localhost:3000
 - Realtime bridge health: http://localhost:3001/health
 - Chat widget script: http://localhost:3001/widget.js
@@ -129,8 +131,8 @@ When adding a user from admin, the **Send sign-in email** toggle (default on) se
 |---|---|
 | `pnpm dev` | Start web + realtime-bridge |
 | `pnpm build` | Production build |
+| `pnpm exec supabase db push` | Push Supabase migrations to hosted project (run before `auth:migrate` on fresh setups) |
 | `pnpm --filter @communication-canoe/web auth:migrate` | Create/update Better Auth tables (uses `--yes`; requires `DATABASE_URL`) |
-| `pnpm exec supabase db push` | Push Supabase migrations to hosted project |
 
 ## Deployment Notes
 
