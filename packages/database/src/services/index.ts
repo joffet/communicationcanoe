@@ -19,6 +19,7 @@ import type {
   Identity,
   LiveTransfer,
   Message,
+  MessageDeliveryStatus,
   Team,
   Tenant,
 } from "../types";
@@ -282,6 +283,13 @@ export class DomainService {
         await this.db.from("identities").update({ name: contact.name }).eq("id", existing.id);
         existing.name = contact.name;
       }
+      if (contact.resideResidentId && !existing.reside_resident_id) {
+        await this.db
+          .from("identities")
+          .update({ reside_resident_id: contact.resideResidentId })
+          .eq("id", existing.id);
+        existing.reside_resident_id = contact.resideResidentId;
+      }
       return this.getCanonicalIdentity(existing.id);
     }
 
@@ -292,6 +300,7 @@ export class DomainService {
         phone: phone ?? null,
         email: email ?? null,
         name: contact.name ?? null,
+        reside_resident_id: contact.resideResidentId ?? null,
       })
       .select("*")
       .single();
@@ -343,7 +352,84 @@ export class DomainService {
         audio_url: input.audioUrl ?? null,
         transcript: input.transcript ?? null,
         ai_summary: input.aiSummary ?? null,
+        delivery_status: input.deliveryStatus ?? null,
       })
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  async getMessageById(messageId: string): Promise<Message | null> {
+    const { data, error } = await this.db
+      .from("messages")
+      .select("*")
+      .eq("id", messageId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
+  }
+
+  async getMessageByProviderMessageId(providerMessageId: string): Promise<Message | null> {
+    const { data, error } = await this.db
+      .from("messages")
+      .select("*")
+      .eq("provider_message_id", providerMessageId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
+  }
+
+  async updateMessageDeliveryStatus(
+    messageId: string,
+    patch: {
+      deliveryStatus: MessageDeliveryStatus;
+      providerMessageId?: string;
+      deliveryError?: string | null;
+      sentAt?: string;
+      deliveredAt?: string;
+      incrementAttempts?: boolean;
+    },
+  ): Promise<Message> {
+    if (patch.incrementAttempts) {
+      const { data: current, error: fetchError } = await this.db
+        .from("messages")
+        .select("delivery_attempts")
+        .eq("id", messageId)
+        .single();
+      if (fetchError) throw fetchError;
+
+      const { data, error } = await this.db
+        .from("messages")
+        .update({
+          delivery_status: patch.deliveryStatus,
+          provider_message_id: patch.providerMessageId,
+          delivery_error: patch.deliveryError ?? null,
+          sent_at: patch.sentAt,
+          delivered_at: patch.deliveredAt,
+          delivery_attempts: current.delivery_attempts + 1,
+        })
+        .eq("id", messageId)
+        .select("*")
+        .single();
+
+      if (error) throw error;
+      return data;
+    }
+
+    const { data, error } = await this.db
+      .from("messages")
+      .update({
+        delivery_status: patch.deliveryStatus,
+        provider_message_id: patch.providerMessageId,
+        delivery_error: patch.deliveryError ?? null,
+        sent_at: patch.sentAt,
+        delivered_at: patch.deliveredAt,
+      })
+      .eq("id", messageId)
       .select("*")
       .single();
 

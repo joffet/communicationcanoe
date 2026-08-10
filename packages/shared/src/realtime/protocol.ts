@@ -35,7 +35,7 @@ export type ChatBroadcastMessage = {
   id: string;
   body: string;
   direction: "inbound" | "outbound";
-  senderType: "external" | "internal_user" | "ai_agent";
+  senderType: "external" | "internal_user" | "ai_agent" | "system";
   channel: "web_chat";
   createdAt: string;
 };

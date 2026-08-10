@@ -29,11 +29,12 @@ export async function sendSesEmail(options: {
   text?: string;
   from?: string;
   tenant?: TenantMailFrom | null;
-}): Promise<void> {
+  configurationSetName?: string;
+}): Promise<{ messageId?: string }> {
   const from = options.from ?? resolveMailFrom(options.tenant);
   const text = options.text ?? stripHtml(options.html);
 
-  await getSesClient().send(
+  const result = await getSesClient().send(
     new SendEmailCommand({
       Source: from,
       Destination: { ToAddresses: [options.to] },
@@ -44,8 +45,11 @@ export async function sendSesEmail(options: {
           Text: { Data: text, Charset: "UTF-8" },
         },
       },
+      ConfigurationSetName: options.configurationSetName,
     }),
   );
+
+  return { messageId: result.MessageId };
 }
 
 function stripHtml(html: string): string {

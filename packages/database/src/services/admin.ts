@@ -79,9 +79,11 @@ export class AdminService {
   }
 
   async createTenant(input: {
+    id?: string;
     name: string;
     twilio_number: string;
     inbound_email_address: string;
+    provisioning_source?: "manual" | "reside";
   }): Promise<Tenant> {
     const twilio_number = normalizePhone(input.twilio_number);
     const inbound_email_address = normalizeEmail(input.inbound_email_address);
@@ -89,10 +91,12 @@ export class AdminService {
     const { data, error } = await this.db
       .from("tenants")
       .insert({
+        ...(input.id ? { id: input.id } : {}),
         name: input.name.trim(),
         twilio_number,
         inbound_email_address,
         chat_widget_key: generateWidgetKey(),
+        provisioning_source: input.provisioning_source ?? "manual",
       })
       .select("*")
       .single();
@@ -280,6 +284,25 @@ export class AdminService {
       );
 
     if (insertError) throw insertError;
+  }
+
+  /**
+   * Adds/updates a single membership without touching the user's other tenants —
+   * unlike setUserTenantMemberships, which replaces the full set.
+   */
+  async upsertTenantMembership(
+    userId: string,
+    tenantId: string,
+    role: "admin" | "member",
+  ): Promise<void> {
+    const { error } = await this.db
+      .from("user_tenant_memberships")
+      .upsert(
+        { user_id: userId, tenant_id: tenantId, role },
+        { onConflict: "user_id,tenant_id" },
+      );
+
+    if (error) throw error;
   }
 
   async getAdminStats() {

@@ -1,0 +1,69 @@
+import { createAdminService, createDomainService } from "@communication-canoe/database";
+import { resideSendMessageInputSchema } from "@communication-canoe/shared/schemas";
+import { verifyResideSecret } from "@/lib/reside/api-secret";
+import { dispatchOutboundMessage } from "@/lib/reside/dispatch-message";
+
+export async function POST(request: Request) {
+  if (!verifyResideSecret(request)) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  const parsed = resideSendMessageInputSchema.safeParse(await request.json());
+  if (!parsed.success) {
+    return Response.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
+  const { tenantId, channel, identity, body, subject, conversationId } = parsed.data;
+
+  const to = channel === "sms" ? identity.phone : identity.email;
+  if (!to) {
+    return Response.json(
+      { error: `identity.${channel === "sms" ? "phone" : "email"} is required for channel "${channel}"` },
+      { status: 400 },
+    );
+  }
+
+  const admin = createAdminService();
+  const domain = createDomainService();
+
+  const tenant = await admin.getTenantById(tenantId);
+  if (!tenant) {
+    return new Response("Unknown tenant", { status: 404 });
+  }
+
+  const resolvedIdentity = await domain.findOrCreateIdentity(tenantId, identity);
+
+  let conversation;
+  if (conversationId) {
+    const thread = await domain.getConversationThread(conversationId);
+    if (!thread || thread.tenant_id !== tenantId || thread.identity_id !== resolvedIdentity.id) {
+      return Response.json({ error: "conversationId does not belong to this tenant/identity" }, { status: 400 });
+    }
+    conversation = thread;
+  } else {
+    conversation = await domain.findOrCreateConversation(tenantId, resolvedIdentity.id);
+  }
+
+  const message = await domain.appendMessage({
+    tenantId,
+    conversationId: conversation.id,
+    channel,
+    direction: "outbound",
+    senderType: "system",
+    body,
+    subject,
+    deliveryStatus: "queued",
+  });
+
+  const sent = await dispatchOutboundMessage({ tenant, message, to });
+
+  return Response.json({
+    message: {
+      id: sent.id,
+      conversationId: sent.conversation_id,
+      deliveryStatus: sent.delivery_status,
+      providerMessageId: sent.provider_message_id,
+      deliveryError: sent.delivery_error,
+    },
+  });
+}

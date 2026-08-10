@@ -45,12 +45,15 @@ export type Database = {
   public: DefaultSchema;
 };
 
+export type TenantProvisioningSource = "manual" | "reside";
+
 export type TenantRow = {
   id: string;
   name: string;
   twilio_number: string;
   inbound_email_address: string;
   chat_widget_key: string;
+  provisioning_source: TenantProvisioningSource;
   created_at: string;
 };
 
@@ -60,6 +63,7 @@ export type TenantInsert = {
   twilio_number: string;
   inbound_email_address: string;
   chat_widget_key?: string;
+  provisioning_source?: TenantProvisioningSource;
   created_at?: string;
 };
 
@@ -153,6 +157,7 @@ export type IdentityRow = {
   name: string | null;
   is_anonymous: boolean;
   merged_into_id: string | null;
+  reside_resident_id: string | null;
   created_at: string;
 };
 
@@ -164,6 +169,7 @@ export type IdentityInsert = {
   name?: string | null;
   is_anonymous?: boolean;
   merged_into_id?: string | null;
+  reside_resident_id?: string | null;
   created_at?: string;
 };
 
@@ -215,19 +221,27 @@ export type ConversationInsert = {
   last_message_at?: string;
 };
 
+export type MessageDeliveryStatus = "queued" | "sent" | "delivered" | "failed" | "undelivered";
+
 export type MessageRow = {
   id: string;
   tenant_id: string;
   conversation_id: string;
   channel: "voice" | "sms" | "email" | "web_chat";
   direction: "inbound" | "outbound";
-  sender_type: "external" | "internal_user" | "ai_agent";
+  sender_type: "external" | "internal_user" | "ai_agent" | "system";
   sender_id: string | null;
   body: string;
   subject: string | null;
   audio_url: string | null;
   transcript: string | null;
   ai_summary: string | null;
+  provider_message_id: string | null;
+  delivery_status: MessageDeliveryStatus | null;
+  delivery_error: string | null;
+  delivery_attempts: number;
+  sent_at: string | null;
+  delivered_at: string | null;
   created_at: string;
 };
 
@@ -237,13 +251,19 @@ export type MessageInsert = {
   conversation_id: string;
   channel: "voice" | "sms" | "email" | "web_chat";
   direction: "inbound" | "outbound";
-  sender_type: "external" | "internal_user" | "ai_agent";
+  sender_type: "external" | "internal_user" | "ai_agent" | "system";
   sender_id?: string | null;
   body?: string;
   subject?: string | null;
   audio_url?: string | null;
   transcript?: string | null;
   ai_summary?: string | null;
+  provider_message_id?: string | null;
+  delivery_status?: MessageDeliveryStatus | null;
+  delivery_error?: string | null;
+  delivery_attempts?: number;
+  sent_at?: string | null;
+  delivered_at?: string | null;
   created_at?: string;
 };
 
