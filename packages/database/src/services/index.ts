@@ -503,6 +503,7 @@ export class DomainService {
         scheduled_send_at: input.scheduledSendAt ?? null,
         ai_review_status: input.aiReviewStatus ?? null,
         topic_check_status: input.topicCheckStatus ?? null,
+        transcription_status: input.transcriptionStatus ?? null,
       })
       .select("*")
       .single();
@@ -2155,6 +2156,47 @@ export class DomainService {
       result.push({ id: row.id, documentId: row.document_id, heading: row.heading, content: row.content });
     }
     return result;
+  }
+
+  // ---- Voicemail transcription (Phase 11) ----
+
+  async listPendingVoicemailTranscriptionMessageIds(limit: number): Promise<string[]> {
+    const { data, error } = await this.db
+      .from("messages")
+      .select("id")
+      .eq("transcription_status", "pending")
+      .order("created_at", { ascending: true })
+      .limit(limit);
+
+    if (error) throw error;
+    return (data ?? []).map((row) => row.id as string);
+  }
+
+  /** Plain conditional update, not an atomic claim like Phase 9/10's workers
+   * need - re-running a transcription on the same audio wastes an API call
+   * but doesn't corrupt state (unlike splitConversation or document
+   * chunking, which are non-idempotent side effects that must happen
+   * exactly once), so the simpler check-only-on-write pattern (mirroring
+   * applyToneReviewResult) is sufficient here. */
+  async updateMessageTranscription(messageId: string, body: string): Promise<void> {
+    const { error } = await this.db
+      .from("messages")
+      .update({ body, transcript: body, transcription_status: "ready" })
+      .eq("id", messageId)
+      .eq("transcription_status", "pending");
+    if (error) throw error;
+  }
+
+  /** Never left stuck at pending - mirrors every other worker's safety-net
+   * convention (markDocumentFailed, applyToneReviewResult's default-to-
+   * flagged, markTopicCheckReviewed). */
+  async markMessageTranscriptionFailed(messageId: string, reason: string): Promise<void> {
+    const { error } = await this.db
+      .from("messages")
+      .update({ transcription_status: "failed", transcription_failure_reason: reason })
+      .eq("id", messageId)
+      .eq("transcription_status", "pending");
+    if (error) throw error;
   }
 
   private async findIdentityByPhone(tenantId: string, phone: string) {

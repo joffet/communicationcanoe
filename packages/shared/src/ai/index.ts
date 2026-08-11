@@ -11,10 +11,12 @@ export type {
   ClassifyTopicShiftInput,
   ClassifyTopicShiftResult,
   EmbeddingProvider,
+  TranscriptionProvider,
 } from "./types";
 
 export { createAiProvider } from "./provider";
 export { createEmbeddingProvider } from "./embedding-provider";
+export { createTranscriptionProvider } from "./transcription-provider";
 export {
   routeConversation,
   summarizeConversation,

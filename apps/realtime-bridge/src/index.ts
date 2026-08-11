@@ -10,6 +10,7 @@ import { startOverdueConversationWorker } from "./workers/overdue-conversation-w
 import { startToneReviewWorker } from "./workers/tone-review-worker.js";
 import { startConversationRoutingWorker } from "./workers/conversation-routing-worker.js";
 import { startDocumentIngestionWorker } from "./workers/document-ingestion-worker.js";
+import { startVoicemailTranscriptionWorker } from "./workers/voicemail-transcription-worker.js";
 
 const config = loadConfig();
 
@@ -104,6 +105,7 @@ startOverdueConversationWorker();
 startToneReviewWorker();
 startConversationRoutingWorker();
 startDocumentIngestionWorker();
+startVoicemailTranscriptionWorker();
 
 async function handleInternal(
   req: import("node:http").IncomingMessage,

@@ -278,6 +278,7 @@ export type MessageDeliveryStatus =
 export type MessageVisibility = "internal" | "external";
 export type MessageAiReviewStatus = "pending" | "approved" | "flagged";
 export type MessageTopicCheckStatus = "pending" | "processing" | "reviewed";
+export type MessageTranscriptionStatus = "pending" | "ready" | "failed";
 
 export type MessageRow = {
   id: string;
@@ -304,6 +305,8 @@ export type MessageRow = {
   ai_review_status: MessageAiReviewStatus | null;
   ai_review_reasoning: string | null;
   topic_check_status: MessageTopicCheckStatus | null;
+  transcription_status: MessageTranscriptionStatus | null;
+  transcription_failure_reason: string | null;
   created_at: string;
 };
 
@@ -332,6 +335,8 @@ export type MessageInsert = {
   ai_review_status?: MessageAiReviewStatus | null;
   ai_review_reasoning?: string | null;
   topic_check_status?: MessageTopicCheckStatus | null;
+  transcription_status?: MessageTranscriptionStatus | null;
+  transcription_failure_reason?: string | null;
   created_at?: string;
 };
 

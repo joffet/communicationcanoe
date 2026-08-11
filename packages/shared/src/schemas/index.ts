@@ -6,6 +6,7 @@ import {
   MESSAGE_DELIVERY_STATUSES,
   MESSAGE_DIRECTIONS,
   MESSAGE_TOPIC_CHECK_STATUSES,
+  MESSAGE_TRANSCRIPTION_STATUSES,
   MESSAGE_VISIBILITIES,
   SENDER_TYPES,
 } from "../constants";
@@ -36,6 +37,10 @@ export const appendMessageInputSchema = z.object({
   // flags the message for the async conversation-routing-worker's AI
   // topic-shift check. Every other caller omits it (column defaults null).
   topicCheckStatus: z.enum(MESSAGE_TOPIC_CHECK_STATUSES).optional(),
+  // Phase 11: set by the recording-status webhook on the empty-body
+  // placeholder it creates for an inbound voicemail - flags the message for
+  // the async voicemail-transcription-worker. Every other caller omits it.
+  transcriptionStatus: z.enum(MESSAGE_TRANSCRIPTION_STATUSES).optional(),
 });
 
 export const identityContactBaseSchema = z.object({

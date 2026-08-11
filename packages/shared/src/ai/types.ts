@@ -65,3 +65,10 @@ export interface ClassifyTopicShiftResult {
 export interface EmbeddingProvider {
   embed(texts: string[]): Promise<number[][]>;
 }
+
+// Same reasoning as EmbeddingProvider - Anthropic has no transcription
+// endpoint either. See createTranscriptionProvider() in
+// transcription-provider.ts.
+export interface TranscriptionProvider {
+  transcribe(audioBuffer: Buffer, mimeType: string): Promise<string>;
+}
