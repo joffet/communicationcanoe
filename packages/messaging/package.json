@@ -1,0 +1,23 @@
+{
+  "name": "@communication-canoe/messaging",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@communication-canoe/shared": "workspace:*",
+    "@communication-canoe/database": "workspace:*",
+    "@aws-sdk/client-ses": "^3.1073.0",
+    "twilio": "^5.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "typescript": "^5.9.3"
+  }
+}

@@ -144,6 +144,8 @@ export class VoiceSession {
       senderType: "external",
       body,
       transcript: body,
+      // A real live call transcript with the customer.
+      visibility: "external",
     });
   }
 

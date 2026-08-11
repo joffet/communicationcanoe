@@ -48,6 +48,14 @@ export function useConversationRealtime(
       .on("broadcast", { event: "handoff_state" }, () => {
         onMessage();
       })
+      // Phase 8: emitted by DomainService.splitConversation/mergeConversations
+      // (packages/database) whenever a conversation is restructured by a raw
+      // UPDATE that bypasses appendMessage's own "message" broadcast - a
+      // generic "refetch this conversation" signal, not shaped like a chat
+      // message, since split/merge can affect any channel.
+      .on("broadcast", { event: "updated" }, () => {
+        onMessage();
+      })
       .subscribe();
 
     return () => {

@@ -1,4 +1,4 @@
-import { sendSesEmail } from "./ses";
+import { sendSesEmail } from "@communication-canoe/messaging";
 import {
   magicLinkSubject,
   renderCanoeMagicLinkHtml,

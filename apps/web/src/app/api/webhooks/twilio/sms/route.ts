@@ -47,7 +47,9 @@ export async function POST(request: Request) {
   }
 
   const identity = await domain.findOrCreateIdentity(tenant.id, { phone: from });
-  const conversation = await domain.findOrCreateConversation(tenant.id, identity.id);
+  const { conversation, isStale } = await domain.findOrCreateConversation(tenant.id, identity.id, {
+    channel: "sms",
+  });
 
   await domain.appendMessage({
     tenantId: tenant.id,
@@ -56,6 +58,12 @@ export async function POST(request: Request) {
     direction: "inbound",
     senderType: "external",
     body,
+    // Came directly from the customer.
+    visibility: "external",
+    // Phase 9: flags this message for the async AI topic-shift check when
+    // the conversation it landed in had gone quiet past the tenant's
+    // staleness threshold - never blocks this response on an AI call.
+    ...(isStale && { topicCheckStatus: "pending" }),
   });
 
   void triggerConversationRouting(conversation.id, tenant.id).catch(console.error);

@@ -1,5 +1,5 @@
 import { createAdminService, createDomainService } from "@communication-canoe/database";
-import { dispatchOutboundMessage } from "./dispatch-message";
+import { dispatchOutboundMessage } from "@communication-canoe/messaging";
 
 /**
  * Clean seam for re-sending a message that previously failed (e.g. surfaced via a `failed`

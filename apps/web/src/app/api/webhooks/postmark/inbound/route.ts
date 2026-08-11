@@ -31,7 +31,10 @@ export async function POST(request: Request) {
     email: email.from,
     name: email.fromName,
   });
-  const conversation = await domain.findOrCreateConversation(tenant.id, identity.id);
+  const { conversation, isStale } = await domain.findOrCreateConversation(tenant.id, identity.id, {
+    channel: "email",
+    subject: email.subject,
+  });
 
   const body = email.textBody || email.subject;
   await domain.appendMessage({
@@ -42,6 +45,12 @@ export async function POST(request: Request) {
     senderType: "external",
     body,
     subject: email.subject,
+    // Came directly from the customer.
+    visibility: "external",
+    // Phase 9: flags this message for the async AI topic-shift check when
+    // the conversation it landed in had gone quiet past the tenant's
+    // staleness threshold - never blocks this response on an AI call.
+    ...(isStale && { topicCheckStatus: "pending" }),
   });
 
   void triggerConversationRouting(conversation.id, tenant.id).catch(console.error);

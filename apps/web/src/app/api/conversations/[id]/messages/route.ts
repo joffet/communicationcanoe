@@ -21,6 +21,9 @@ export async function POST(
     senderType: "internal_user",
     senderId: access.session.user.id,
     body: text,
+    // Relayed live to the customer's chat session below - no internal-note
+    // compose flow exists yet, so this is always customer-visible today.
+    visibility: "external",
   });
 
   await notifyBridgeAgentMessage({

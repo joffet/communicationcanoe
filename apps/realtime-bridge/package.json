@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@communication-canoe/database": "workspace:*",
+    "@communication-canoe/messaging": "workspace:*",
     "@communication-canoe/shared": "workspace:*",
     "@supabase/supabase-js": "^2.49.8",
     "openai": "^4.104.0",

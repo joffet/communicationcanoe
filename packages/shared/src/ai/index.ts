@@ -6,7 +6,19 @@ export type {
   RouteConversationResult,
   SummarizeConversationInput,
   SuggestReplyInput,
+  ReviewMessageToneInput,
+  ReviewMessageToneResult,
+  ClassifyTopicShiftInput,
+  ClassifyTopicShiftResult,
+  EmbeddingProvider,
 } from "./types";
 
 export { createAiProvider } from "./provider";
-export { routeConversation, summarizeConversation, suggestReply } from "./tasks";
+export { createEmbeddingProvider } from "./embedding-provider";
+export {
+  routeConversation,
+  summarizeConversation,
+  suggestReply,
+  reviewMessageTone,
+  classifyTopicShift,
+} from "./tasks";

@@ -1,0 +1,129 @@
+import { createAdminService, createDomainService } from "@communication-canoe/database";
+import { dispatchOutboundMessage } from "@communication-canoe/messaging";
+
+const POLL_INTERVAL_MS = 7_000;
+const BATCH_LIMIT = 25;
+
+/**
+ * Drains reside's bulk-send queue (outbound_batches/outbound_batch_recipients -
+ * see supabase/migrations/20250701000000_outbound_batches.sql), dispatching each
+ * pending recipient through the same per-recipient machinery the single-send
+ * endpoint uses (findOrCreateIdentity -> findOrCreateConversation ->
+ * appendMessage -> dispatchOutboundMessage).
+ *
+ * This is the repo's first piece of recurring background-work infrastructure -
+ * intentionally minimal (no row-locking, no distributed coordination). Safe as
+ * long as only one realtime-bridge instance runs this loop; revisit if that
+ * service is ever horizontally scaled.
+ */
+export function startOutboundBatchWorker(): void {
+  setInterval(() => {
+    void drainPendingRecipients().catch((err) => {
+      console.error("[outbound-batch-worker] tick failed:", err);
+    });
+  }, POLL_INTERVAL_MS);
+  console.log(`[outbound-batch-worker] polling every ${POLL_INTERVAL_MS}ms`);
+}
+
+async function drainPendingRecipients(): Promise<void> {
+  const domain = createDomainService();
+  const admin = createAdminService();
+
+  const recipients = await domain.listPendingOutboundBatchRecipients(BATCH_LIMIT);
+  if (recipients.length === 0) return;
+
+  console.log(`[outbound-batch-worker] draining ${recipients.length} recipient(s)`);
+
+  // Many recipients in one tick typically belong to the same batch/tenant -
+  // cache both lookups within the tick rather than refetching per recipient.
+  const tenantCache = new Map<string, Awaited<ReturnType<typeof admin.getTenantById>>>();
+  const batchCache = new Map<string, Awaited<ReturnType<typeof domain.getOutboundBatch>>>();
+
+  for (const recipient of recipients) {
+    try {
+      let tenant = tenantCache.get(recipient.tenant_id);
+      if (tenant === undefined) {
+        tenant = await admin.getTenantById(recipient.tenant_id);
+        tenantCache.set(recipient.tenant_id, tenant);
+      }
+      if (!tenant) {
+        await failRecipient(domain, recipient.id, recipient.batch_id, `Unknown tenant: ${recipient.tenant_id}`);
+        continue;
+      }
+
+      let batch = batchCache.get(recipient.batch_id);
+      if (batch === undefined) {
+        batch = await domain.getOutboundBatch(recipient.batch_id);
+        batchCache.set(recipient.batch_id, batch);
+      }
+
+      const identity = recipient.identity_contact as {
+        phone?: string;
+        email?: string;
+        name?: string;
+        resideResidentId?: string;
+      };
+
+      const to = recipient.channel === "sms" ? identity.phone : identity.email;
+      if (!to) {
+        await failRecipient(
+          domain,
+          recipient.id,
+          recipient.batch_id,
+          `identity is missing ${recipient.channel === "sms" ? "phone" : "email"}`,
+        );
+        continue;
+      }
+
+      const resolvedIdentity = await domain.findOrCreateIdentity(recipient.tenant_id, identity);
+      // Outbound/system-attributed send - no topic to classify, isStale is
+      // irrelevant here (Phase 9's staleness check only matters for
+      // inbound resident messages).
+      const { conversation } = await domain.findOrCreateConversation(recipient.tenant_id, resolvedIdentity.id, {
+        channel: recipient.channel,
+      });
+
+      const message = await domain.appendMessage({
+        tenantId: recipient.tenant_id,
+        conversationId: conversation.id,
+        channel: recipient.channel,
+        direction: "outbound",
+        senderType: "system",
+        body: recipient.body,
+        subject: batch?.subject ?? undefined,
+        deliveryStatus: "queued",
+        // Reside Notices/bulk-send recipients - actually delivered to residents.
+        visibility: "external",
+      });
+
+      const sent = await dispatchOutboundMessage({ tenant, message, to });
+
+      await domain.updateOutboundBatchRecipientStatus(recipient.id, {
+        status: sent.delivery_status === "failed" ? "failed" : "sent",
+        messageId: sent.id,
+        error: sent.delivery_error ?? null,
+      });
+      await domain.incrementOutboundBatchCompleted(recipient.batch_id);
+    } catch (err) {
+      console.error(`[outbound-batch-worker] recipient ${recipient.id} failed:`, err);
+      await failRecipient(
+        domain,
+        recipient.id,
+        recipient.batch_id,
+        err instanceof Error ? err.message : String(err),
+      ).catch((innerErr) => {
+        console.error(`[outbound-batch-worker] failed to record failure for ${recipient.id}:`, innerErr);
+      });
+    }
+  }
+}
+
+async function failRecipient(
+  domain: ReturnType<typeof createDomainService>,
+  recipientId: string,
+  batchId: string,
+  error: string,
+): Promise<void> {
+  await domain.updateOutboundBatchRecipientStatus(recipientId, { status: "failed", error });
+  await domain.incrementOutboundBatchCompleted(batchId);
+}

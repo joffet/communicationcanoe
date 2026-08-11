@@ -115,13 +115,19 @@ async function createNewSession(
   tenantId: string,
   msg: ChatWidgetInitMessage,
 ) {
+  // Phase 9: web_chat sessions ignore isStale - they're pinned once
+  // resumed (Phase 8's resume-follow fix already handles reconnecting to a
+  // since-split conversation), so staleness-triggered review isn't wired
+  // up for this channel, a deliberately narrow scoping decision.
   if (msg.skipAnonymous || (!msg.email && !msg.name)) {
     const identity = await domain.findOrCreateAnonymousIdentity(tenantId, {
       name: msg.name,
       email: msg.email,
       skipAnonymous: true,
     });
-    const conversation = await domain.findOrCreateConversation(tenantId, identity.id);
+    const { conversation } = await domain.findOrCreateConversation(tenantId, identity.id, {
+      channel: "web_chat",
+    });
     return { conversationId: conversation.id, identityId: identity.id };
   }
 
@@ -130,7 +136,9 @@ async function createNewSession(
       name: msg.name,
       email: msg.email,
     });
-    const conversation = await domain.findOrCreateConversation(tenantId, identity.id);
+    const { conversation } = await domain.findOrCreateConversation(tenantId, identity.id, {
+      channel: "web_chat",
+    });
     return { conversationId: conversation.id, identityId: identity.id };
   }
 
@@ -138,7 +146,9 @@ async function createNewSession(
     name: msg.name,
     skipAnonymous: true,
   });
-  const conversation = await domain.findOrCreateConversation(tenantId, identity.id);
+  const { conversation } = await domain.findOrCreateConversation(tenantId, identity.id, {
+    channel: "web_chat",
+  });
   return { conversationId: conversation.id, identityId: identity.id };
 }
 

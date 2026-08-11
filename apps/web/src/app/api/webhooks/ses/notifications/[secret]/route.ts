@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { createDomainService } from "@communication-canoe/database";
+import { notifyResideIdentityStatus } from "@/lib/reside/identity-status-client";
 
 type SesEvent = {
   eventType: "Delivery" | "Bounce" | "Complaint" | string;
@@ -63,6 +64,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ sec
       deliveryStatus: "delivered",
       deliveredAt: event.delivery?.timestamp ?? new Date().toISOString(),
     });
+    await recordOutcomeAndMaybeNotifyReside(domain, message, "success");
   } else if (event.eventType === "Bounce") {
     const detail =
       event.bounce?.bouncedRecipients?.[0]?.diagnosticCode ??
@@ -72,12 +74,48 @@ export async function POST(request: Request, { params }: { params: Promise<{ sec
       deliveryStatus: "failed",
       deliveryError: detail,
     });
+    // Only hard (Permanent) bounces count toward the threshold - transient
+    // bounces are likely to succeed on a later retry.
+    if (event.bounce?.bounceType === "Permanent") {
+      await recordOutcomeAndMaybeNotifyReside(domain, message, "hard_failure");
+    }
   } else if (event.eventType === "Complaint") {
     await domain.updateMessageDeliveryStatus(message.id, {
       deliveryStatus: "failed",
       deliveryError: event.complaint?.complaintFeedbackType ?? "complaint",
     });
+    // A spam complaint is at least as strong a signal to stop emailing this
+    // address as a hard bounce.
+    await recordOutcomeAndMaybeNotifyReside(domain, message, "hard_failure");
   }
 
   return new Response("OK", { status: 200 });
+}
+
+async function recordOutcomeAndMaybeNotifyReside(
+  domain: ReturnType<typeof createDomainService>,
+  message: { id: string; tenant_id: string; conversation_id: string },
+  outcome: "success" | "hard_failure",
+): Promise<void> {
+  const thread = await domain.getConversationThread(message.conversation_id);
+  if (!thread) return;
+
+  const settings = await domain.getTenantSettings(message.tenant_id);
+  const threshold = settings?.bounce_threshold ?? 3;
+
+  const { crossedThreshold, clearedFlag } = await domain.recordChannelDeliveryOutcome(
+    thread.identity.id,
+    "email",
+    outcome,
+    threshold,
+  );
+
+  if ((crossedThreshold || clearedFlag) && thread.identity.reside_resident_id) {
+    await notifyResideIdentityStatus({
+      resideClientUid: message.tenant_id,
+      resideResidentId: thread.identity.reside_resident_id,
+      channel: "email",
+      status: crossedThreshold ? "undeliverable" : "deliverable",
+    });
+  }
 }

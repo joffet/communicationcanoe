@@ -4,6 +4,12 @@ import { WebSocketServer } from "ws";
 import { loadConfig } from "./config.js";
 import { handleChatConnection, handleAgentMessage, handleHandoffJoin } from "./routes/chat-widget.js";
 import { handleTwilioStreamConnection } from "./routes/twilio-stream.js";
+import { startOutboundBatchWorker } from "./workers/outbound-batch-worker.js";
+import { startScheduledMessageWorker } from "./workers/scheduled-message-worker.js";
+import { startOverdueConversationWorker } from "./workers/overdue-conversation-worker.js";
+import { startToneReviewWorker } from "./workers/tone-review-worker.js";
+import { startConversationRoutingWorker } from "./workers/conversation-routing-worker.js";
+import { startDocumentIngestionWorker } from "./workers/document-ingestion-worker.js";
 
 const config = loadConfig();
 
@@ -91,6 +97,13 @@ server.on("upgrade", (request, socket, head) => {
 server.listen(config.port, () => {
   console.log(`realtime-bridge listening on http://localhost:${config.port}`);
 });
+
+startOutboundBatchWorker();
+startScheduledMessageWorker();
+startOverdueConversationWorker();
+startToneReviewWorker();
+startConversationRoutingWorker();
+startDocumentIngestionWorker();
 
 async function handleInternal(
   req: import("node:http").IncomingMessage,

@@ -1,9 +1,12 @@
 import { z } from "zod";
 import {
   CONVERSATION_STATUSES,
+  MESSAGE_AI_REVIEW_STATUSES,
   MESSAGE_CHANNELS,
   MESSAGE_DELIVERY_STATUSES,
   MESSAGE_DIRECTIONS,
+  MESSAGE_TOPIC_CHECK_STATUSES,
+  MESSAGE_VISIBILITIES,
   SENDER_TYPES,
 } from "../constants";
 
@@ -20,6 +23,19 @@ export const appendMessageInputSchema = z.object({
   transcript: z.string().optional(),
   aiSummary: z.string().optional(),
   deliveryStatus: z.enum(MESSAGE_DELIVERY_STATUSES).optional(),
+  // Optional at the schema level - the DB column defaults to 'internal', but
+  // every existing call site explicitly passes 'external' (see Phase 2's 2C:
+  // every message-writing flow that exists today already reached, or came
+  // from, the customer). Only a future internal-note compose flow should
+  // rely on the default.
+  visibility: z.enum(MESSAGE_VISIBILITIES).optional(),
+  scheduledSendAt: z.string().optional(),
+  aiReviewStatus: z.enum(MESSAGE_AI_REVIEW_STATUSES).optional(),
+  // Phase 9: set by the two inbound webhook callers when
+  // findOrCreateConversation reports the resolved conversation was stale -
+  // flags the message for the async conversation-routing-worker's AI
+  // topic-shift check. Every other caller omits it (column defaults null).
+  topicCheckStatus: z.enum(MESSAGE_TOPIC_CHECK_STATUSES).optional(),
 });
 
 export const identityContactBaseSchema = z.object({
@@ -86,6 +102,155 @@ export const resideSendMessageInputSchema = z
     path: ["subject"],
   });
 
+export const resideSendBulkMessageInputSchema = z
+  .object({
+    tenantId: z.string().uuid(),
+    channel: z.enum(["sms", "email"]),
+    body: z.string().min(1),
+    subject: z.string().optional(),
+    recipients: z.array(identityContactBaseSchema).min(1).max(2000),
+  })
+  .refine((data) => data.recipients.every((r) => Boolean(r.phone || r.email)), {
+    message: "every recipient requires at least one of phone or email",
+    path: ["recipients"],
+  })
+  .refine((data) => data.channel !== "email" || Boolean(data.subject), {
+    message: "subject is required when channel is email",
+    path: ["subject"],
+  });
+
+// ---- Phase 3: reside-attributed conversation actions ----
+// Every write below is triggered by a reside admin acting through reside's
+// native Inbox UI, not a comm-canoe session - the actor is always supplied
+// explicitly (mirroring the SSO token's claim shape) and resolved server-side
+// by resolveOrCreateResideActor (apps/web/src/lib/reside/resolve-actor.ts).
+export const resideActorSchema = z.object({
+  resideUserId: z.string().min(1),
+  email: z.string().email(),
+  name: z.string().optional(),
+  role: z.enum(["admin", "user", "super"]).optional(),
+});
+
+export const resideAddTagInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  tagName: z.string().min(1),
+});
+
+export const resideRemoveTagInputSchema = z.object({
+  tenantId: z.string().uuid(),
+});
+
+export const resideAssigneeInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  actor: resideActorSchema,
+  assignee: resideActorSchema,
+});
+
+export const resideRemoveAssigneeInputSchema = z.object({
+  tenantId: z.string().uuid(),
+});
+
+export const resideParticipantInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  actor: resideActorSchema,
+  participant: resideActorSchema,
+});
+
+export const resideConversationReplyInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  actor: resideActorSchema,
+  channel: z.enum(["sms", "email"]),
+  body: z.string().min(1),
+  visibility: z.enum(MESSAGE_VISIBILITIES),
+});
+
+export const resideCancelScheduledMessageInputSchema = z.object({
+  tenantId: z.string().uuid(),
+});
+
+export const resideApproveFlaggedMessageInputSchema = z.object({
+  tenantId: z.string().uuid(),
+});
+
+export const resideUpdateConversationStatusInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  status: z.enum(CONVERSATION_STATUSES),
+});
+
+// ---- Phase 4: resident-facing conversation endpoints ----
+// The actor here is the resident themselves, identified by phone/email
+// (matching however comm-canoe already resolves identities for outbound
+// sends), not a resolved platform user - a fundamentally different anchor
+// than Phase 3's resideActorSchema.
+export const resideMemberListInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  contact: identityContactSchema,
+});
+
+export const resideMemberThreadInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  contact: identityContactSchema,
+});
+
+export const resideMemberReplyInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  contact: identityContactSchema,
+  channel: z.enum(["sms", "email"]),
+  body: z.string().min(1),
+});
+
+// ---- Phase 5: tenant-settings updates from reside ----
+// Only the two fields reside needs to configure - not the full tenant_settings
+// surface (greeting_message/business_hours/bounce_threshold etc. aren't
+// reside-configurable yet and don't need to be for this phase).
+export const resideUpdateTenantSettingsInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  defaultResponseWindowMinutes: z.number().int().positive().max(1440).optional(),
+  externalSendDelaySeconds: z.number().int().min(0).max(3600).optional(),
+  conversationStalenessMinutes: z.number().int().positive().max(10080).optional(),
+  // Phase 10 feeder-gap fix: faq_snippets has existed on tenant_settings
+  // since before this project started, but had zero write path anywhere in
+  // either repo - suggestReply's FAQ input was always empty for a real
+  // tenant as a result.
+  faqSnippets: z.array(z.object({ q: z.string().min(1), a: z.string().min(1) })).max(200).optional(),
+});
+
+// ---- Phase 7: conversation merging ----
+export const resideMergeConversationsInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  actor: resideActorSchema,
+  targetConversationId: z.string().uuid(),
+});
+
+// ---- Phase 8: conversation splitting (manual/admin-triggered only) ----
+export const resideSplitConversationInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  actor: resideActorSchema,
+  messageId: z.string().uuid(),
+});
+
+// ---- Phase 10: AI intermediate reply (real RAG) ----
+// reside extracts text locally and sends only the extracted plain text here -
+// comm-canoe never touches raw files or S3 (see contentText's size cap: a
+// generous but real ceiling, matching reside's own ~15MB/~100-page upload
+// validation, so a malformed request can't smuggle an unbounded payload
+// through even though the real cap enforcement is the tenant document/chunk
+// count check in the endpoint itself).
+export const resideCreateKnowledgeDocumentInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  filename: z.string().min(1).max(500),
+  contentText: z.string().min(1).max(2_000_000),
+  extractor: z.string().min(1).max(100),
+  pageCount: z.number().int().positive().optional(),
+  uploadedBy: z.string().optional(),
+});
+
+export type ResideActorClaims = z.infer<typeof resideActorSchema>;
+export type ResideAddTagInput = z.infer<typeof resideAddTagInputSchema>;
+export type ResideAssigneeInput = z.infer<typeof resideAssigneeInputSchema>;
+export type ResideParticipantInput = z.infer<typeof resideParticipantInputSchema>;
+export type ResideConversationReplyInput = z.infer<typeof resideConversationReplyInputSchema>;
+
 export type AppendMessageInput = z.infer<typeof appendMessageInputSchema>;
 export type IdentityContact = z.infer<typeof identityContactSchema>;
 export type AnonymousIdentityInput = z.infer<typeof anonymousIdentitySchema>;
@@ -94,3 +259,5 @@ export type LogLiveTransferInput = z.infer<typeof logLiveTransferInputSchema>;
 export type ConversationFilters = z.infer<typeof conversationFiltersSchema>;
 export type ProvisionTenantInput = z.infer<typeof provisionTenantInputSchema>;
 export type ResideSendMessageInput = z.infer<typeof resideSendMessageInputSchema>;
+export type ResideSendBulkMessageInput = z.infer<typeof resideSendBulkMessageInputSchema>;
+export type ResideCreateKnowledgeDocumentInput = z.infer<typeof resideCreateKnowledgeDocumentInputSchema>;

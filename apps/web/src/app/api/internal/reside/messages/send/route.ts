@@ -1,7 +1,7 @@
 import { createAdminService, createDomainService } from "@communication-canoe/database";
 import { resideSendMessageInputSchema } from "@communication-canoe/shared/schemas";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
-import { dispatchOutboundMessage } from "@/lib/reside/dispatch-message";
+import { dispatchOutboundMessage } from "@communication-canoe/messaging";
 
 export async function POST(request: Request) {
   if (!verifyResideSecret(request)) {
@@ -41,7 +41,10 @@ export async function POST(request: Request) {
     }
     conversation = thread;
   } else {
-    conversation = await domain.findOrCreateConversation(tenantId, resolvedIdentity.id);
+    // Outbound/system-attributed send - no topic to classify, isStale is
+    // irrelevant here (Phase 9's staleness check only matters for inbound
+    // resident messages).
+    ({ conversation } = await domain.findOrCreateConversation(tenantId, resolvedIdentity.id, { channel }));
   }
 
   const message = await domain.appendMessage({
@@ -53,6 +56,8 @@ export async function POST(request: Request) {
     body,
     subject,
     deliveryStatus: "queued",
+    // Reside-originated sends are always actually delivered to the resident.
+    visibility: "external",
   });
 
   const sent = await dispatchOutboundMessage({ tenant, message, to });

@@ -77,6 +77,8 @@ export class ChatSession {
           direction: "outbound",
           senderType: "ai_agent",
           body,
+          // Sent live to the visitor below (this.send).
+          visibility: "external",
         });
 
         this.send({ type: "message", text: body, senderType: "ai_agent" });
@@ -147,6 +149,8 @@ export class ChatSession {
         senderType: "external",
         senderId: this.identityId,
         body: text,
+        // Came directly from the visitor.
+        visibility: "external",
       });
       await broadcastChatMessage(this.conversationId, {
         id: message.id,
@@ -176,6 +180,8 @@ export class ChatSession {
       senderType: "external",
       senderId: this.identityId,
       body: text,
+      // Came directly from the visitor.
+      visibility: "external",
     });
 
     this.realtime?.sendUserText(text);
@@ -260,6 +266,8 @@ export class ChatSession {
       senderType: "internal_user",
       senderId: agentUserId,
       body,
+      // Sent live to the visitor below (this.send).
+      visibility: "external",
     });
 
     this.send({

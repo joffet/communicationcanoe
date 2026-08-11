@@ -10,7 +10,8 @@
     "./schemas": "./src/schemas/index.ts",
     "./constants": "./src/constants.ts",
     "./realtime": "./src/realtime/index.ts",
-    "./retry": "./src/retry.ts"
+    "./retry": "./src/retry.ts",
+    "./knowledge": "./src/knowledge/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

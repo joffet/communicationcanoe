@@ -13,7 +13,7 @@ type ResideAuthUser = User & {
   resideClientUid?: string | null;
 };
 
-function mapTenantRole(role?: "admin" | "user" | "super"): "admin" | "member" {
+export function mapTenantRole(role?: "admin" | "user" | "super"): "admin" | "member" {
   return role === "admin" || role === "super" ? "admin" : "member";
 }
 

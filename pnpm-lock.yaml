@@ -23,6 +23,9 @@ importers:
       '@communication-canoe/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@communication-canoe/messaging':
+        specifier: workspace:*
+        version: link:../../packages/messaging
       '@communication-canoe/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -54,12 +57,12 @@ importers:
 
   apps/web:
     dependencies:
-      '@aws-sdk/client-ses':
-        specifier: ^3.1073.0
-        version: 3.1073.0
       '@communication-canoe/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@communication-canoe/messaging':
+        specifier: workspace:*
+        version: link:../../packages/messaging
       '@communication-canoe/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -163,6 +166,28 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.49.8
         version: 2.108.2
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.43
+        version: 20.19.43
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/messaging:
+    dependencies:
+      '@aws-sdk/client-ses':
+        specifier: ^3.1073.0
+        version: 3.1073.0
+      '@communication-canoe/database':
+        specifier: workspace:*
+        version: link:../database
+      '@communication-canoe/shared':
+        specifier: workspace:*
+        version: link:../shared
+      twilio:
+        specifier: ^5.7.0
+        version: 5.13.1
     devDependencies:
       '@types/node':
         specifier: ^20.19.43

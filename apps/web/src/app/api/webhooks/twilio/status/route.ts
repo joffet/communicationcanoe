@@ -1,6 +1,7 @@
 import twilio from "twilio";
 import { createDomainService } from "@communication-canoe/database";
 import type { MessageDeliveryStatus } from "@communication-canoe/database";
+import { notifyResideIdentityStatus } from "@/lib/reside/identity-status-client";
 
 function validateTwilioSignature(
   authToken: string,
@@ -71,5 +72,39 @@ export async function POST(request: Request) {
     deliveredAt: deliveryStatus === "delivered" ? new Date().toISOString() : undefined,
   });
 
+  if (deliveryStatus === "delivered") {
+    await recordOutcomeAndMaybeNotifyReside(domain, message, "success");
+  } else if (deliveryStatus === "failed" || deliveryStatus === "undelivered") {
+    await recordOutcomeAndMaybeNotifyReside(domain, message, "hard_failure");
+  }
+
   return new Response("OK", { status: 200 });
+}
+
+async function recordOutcomeAndMaybeNotifyReside(
+  domain: ReturnType<typeof createDomainService>,
+  message: { id: string; tenant_id: string; conversation_id: string },
+  outcome: "success" | "hard_failure",
+): Promise<void> {
+  const thread = await domain.getConversationThread(message.conversation_id);
+  if (!thread) return;
+
+  const settings = await domain.getTenantSettings(message.tenant_id);
+  const threshold = settings?.bounce_threshold ?? 3;
+
+  const { crossedThreshold, clearedFlag } = await domain.recordChannelDeliveryOutcome(
+    thread.identity.id,
+    "sms",
+    outcome,
+    threshold,
+  );
+
+  if ((crossedThreshold || clearedFlag) && thread.identity.reside_resident_id) {
+    await notifyResideIdentityStatus({
+      resideClientUid: message.tenant_id,
+      resideResidentId: thread.identity.reside_resident_id,
+      channel: "sms",
+      status: crossedThreshold ? "undeliverable" : "deliverable",
+    });
+  }
 }
