@@ -32,6 +32,8 @@ type DatabaseTables = {
   tags: TableDef<TagRow, TagInsert>;
   conversation_tags: TableDef<ConversationTagRow, ConversationTagInsert>;
   conversation_assignees: TableDef<ConversationAssigneeRow, ConversationAssigneeInsert>;
+  conversation_read_states: TableDef<ConversationReadStateRow, ConversationReadStateInsert>;
+  conversation_personal_tags: TableDef<ConversationPersonalTagRow, ConversationPersonalTagInsert>;
   conversation_participants: TableDef<ConversationParticipantRow, ConversationParticipantInsert>;
   conversation_splits: TableDef<ConversationSplitRow, ConversationSplitInsert>;
   documents: TableDef<DocumentRow, DocumentInsert>;
@@ -482,6 +484,32 @@ export type ConversationAssigneeInsert = {
   assigned_by?: string | null;
 };
 
+export type ConversationReadStateRow = {
+  conversation_id: string;
+  user_id: string;
+  last_read_at: string;
+  last_read_message_id: string | null;
+};
+
+export type ConversationReadStateInsert = {
+  conversation_id: string;
+  user_id: string;
+  last_read_at?: string;
+  last_read_message_id?: string | null;
+};
+
+export type ConversationPersonalTagRow = {
+  conversation_id: string;
+  user_id: string;
+  created_at: string;
+};
+
+export type ConversationPersonalTagInsert = {
+  conversation_id: string;
+  user_id: string;
+  created_at?: string;
+};
+
 export type ConversationParticipantRow = {
   id: string;
   conversation_id: string;
@@ -593,6 +621,8 @@ export type OutboundBatch = OutboundBatchRow;
 export type OutboundBatchRecipient = OutboundBatchRecipientRow;
 export type Tag = TagRow;
 export type ConversationAssignee = ConversationAssigneeRow;
+export type ConversationReadState = ConversationReadStateRow;
+export type ConversationPersonalTag = ConversationPersonalTagRow;
 export type ConversationParticipant = ConversationParticipantRow;
 export type Document = DocumentRow;
 export type DocumentChunk = DocumentChunkRow;
@@ -612,6 +642,19 @@ export type ConversationExtras = {
 export type ConversationWithIdentity = Conversation & {
   identity: Identity;
 } & ConversationExtras;
+
+/** Per-viewer enrichment (Reside dashboard unread/relevance) - computed
+ * relative to a single resolved viewer user id, never batched across all
+ * tenant admins the way ConversationExtras is, since it's meaningless
+ * without a specific viewer in mind. Kept out of ConversationExtras/
+ * ConversationWithIdentity so every existing call site (comm-canoe's own
+ * dashboard, the resident-facing member endpoints) is unaffected - only the
+ * reside conversations list route opts in by passing a viewerUserId. */
+export type ConversationViewerState = {
+  viewer_is_relevant: boolean;
+  viewer_has_unread: boolean;
+  viewer_last_read_at: string | null;
+};
 
 export type ConversationThread = Conversation & {
   identity: Identity;

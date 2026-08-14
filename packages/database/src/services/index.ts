@@ -17,8 +17,11 @@ import type {
   ConversationAssignee,
   ConversationExtras,
   ConversationParticipant,
+  ConversationPersonalTag,
   ConversationPriority,
+  ConversationReadState,
   ConversationThread,
+  ConversationViewerState,
   ConversationWithIdentity,
   Document,
   DocumentChunkInsert,
@@ -1255,6 +1258,164 @@ export class DomainService {
     return data ?? [];
   }
 
+  // ---- Personal tags (Reside dashboard viewer relevance) — a lighter-weight
+  // "relevant to me" marker than assignees, same shape/dedup pattern. ----
+
+  async addConversationPersonalTag(conversationId: string, userId: string): Promise<ConversationPersonalTag> {
+    const { data, error } = await this.db
+      .from("conversation_personal_tags")
+      .upsert({ conversation_id: conversationId, user_id: userId }, { onConflict: "conversation_id,user_id" })
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  async removeConversationPersonalTag(conversationId: string, userId: string): Promise<void> {
+    const { error } = await this.db
+      .from("conversation_personal_tags")
+      .delete()
+      .eq("conversation_id", conversationId)
+      .eq("user_id", userId);
+    if (error) throw error;
+  }
+
+  async listConversationPersonalTags(conversationId: string): Promise<ConversationPersonalTag[]> {
+    const { data, error } = await this.db
+      .from("conversation_personal_tags")
+      .select("*")
+      .eq("conversation_id", conversationId);
+    if (error) throw error;
+    return data ?? [];
+  }
+
+  // ---- Per-user read tracking (Reside dashboard unread counts) ----
+
+  /** Advances userId's read cursor on conversationId to the newest message
+   * across its whole merge chain (mirroring getConversationThread's
+   * chain-aware read) - written against whatever id the caller passes, so
+   * callers resolve to the canonical id first the same way every other
+   * conversation-scoped write here does. A conversation with no messages yet
+   * (shouldn't happen in practice, but not guaranteed by the schema) falls
+   * back to the current time rather than leaving last_read_at null. */
+  async markConversationRead(conversationId: string, userId: string): Promise<ConversationReadState> {
+    const chainIds = await this.getConversationMergeChainIds(conversationId);
+
+    const { data: latestMessage, error: msgError } = await this.db
+      .from("messages")
+      .select("id, created_at")
+      .in("conversation_id", chainIds.length ? chainIds : [conversationId])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (msgError) throw msgError;
+
+    const { data, error } = await this.db
+      .from("conversation_read_states")
+      .upsert(
+        {
+          conversation_id: conversationId,
+          user_id: userId,
+          last_read_at: latestMessage?.created_at ?? new Date().toISOString(),
+          last_read_message_id: latestMessage?.id ?? null,
+        },
+        { onConflict: "conversation_id,user_id" },
+      )
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  /** Batched per-viewer relevance/unread lookup, mirroring
+   * getConversationExtrasMap's batching shape - one round trip per source
+   * table regardless of list size, scoped to a single viewer since these
+   * fields are meaningless without one. Callers pass the conversation rows
+   * they already fetched (need only id/last_message_at) rather than this
+   * re-querying them. */
+  async getViewerConversationStates(
+    conversations: Array<Pick<Conversation, "id" | "last_message_at">>,
+    viewerUserId: string,
+  ): Promise<Map<string, ConversationViewerState>> {
+    const map = new Map<string, ConversationViewerState>();
+    if (conversations.length === 0) return map;
+
+    const conversationIds = conversations.map((c) => c.id);
+    const [assigneeRes, personalTagRes, readStateRes] = await Promise.all([
+      this.db
+        .from("conversation_assignees")
+        .select("conversation_id")
+        .eq("user_id", viewerUserId)
+        .in("conversation_id", conversationIds),
+      this.db
+        .from("conversation_personal_tags")
+        .select("conversation_id")
+        .eq("user_id", viewerUserId)
+        .in("conversation_id", conversationIds),
+      this.db
+        .from("conversation_read_states")
+        .select("conversation_id, last_read_at")
+        .eq("user_id", viewerUserId)
+        .in("conversation_id", conversationIds),
+    ]);
+    if (assigneeRes.error) throw assigneeRes.error;
+    if (personalTagRes.error) throw personalTagRes.error;
+    if (readStateRes.error) throw readStateRes.error;
+
+    const relevantIds = new Set<string>([
+      ...(assigneeRes.data ?? []).map((r) => r.conversation_id as string),
+      ...(personalTagRes.data ?? []).map((r) => r.conversation_id as string),
+    ]);
+    const lastReadAtByConversation = new Map(
+      (readStateRes.data ?? []).map((r) => [r.conversation_id as string, r.last_read_at as string]),
+    );
+
+    for (const c of conversations) {
+      const isRelevant = relevantIds.has(c.id);
+      const lastReadAt = lastReadAtByConversation.get(c.id) ?? null;
+      const hasUnread = isRelevant && (!lastReadAt || new Date(lastReadAt) < new Date(c.last_message_at));
+      map.set(c.id, {
+        viewer_is_relevant: isRelevant,
+        viewer_has_unread: hasUnread,
+        viewer_last_read_at: lastReadAt,
+      });
+    }
+    return map;
+  }
+
+  /** Dashboard summary counts (avoids shipping full conversation payloads
+   * for a two-number card). Mirrors getConversationsForTenant's default of
+   * excluding 'merged' - a merged-away source has its assignees/personal
+   * tags physically moved off by moveConversationExtras, so it would never
+   * show as relevant anyway, but excluding it up front keeps this a single
+   * lean query instead of full conversation rows. */
+  async getConversationMetricsForViewer(
+    tenantId: string,
+    viewerUserId: string,
+  ): Promise<{ unread_relevant_count: number; open_relevant_count: number }> {
+    const { data: conversations, error } = await this.db
+      .from("conversations")
+      .select("id, status, last_message_at")
+      .eq("tenant_id", tenantId)
+      .neq("status", "merged");
+    if (error) throw error;
+    if (!conversations?.length) return { unread_relevant_count: 0, open_relevant_count: 0 };
+
+    const states = await this.getViewerConversationStates(conversations, viewerUserId);
+
+    let unread = 0;
+    let open = 0;
+    for (const c of conversations) {
+      const state = states.get(c.id);
+      if (!state?.viewer_is_relevant) continue;
+      if (c.status !== "resolved") open += 1;
+      if (state.viewer_has_unread) unread += 1;
+    }
+    return { unread_relevant_count: unread, open_relevant_count: open };
+  }
+
   // ---- Multi-participant conversations (Phase 2 / 2D) — purely additive, see
   // conversation_participants migration's comment: conversations.identity_id
   // stays the unchanged "primary" identity for all existing threading logic. ----
@@ -1304,31 +1465,60 @@ export class DomainService {
   // rewritten (see getConversationThread's chain-aware read above), only
   // tags/assignees/participants (cheap join rows) are physically moved. ----
 
-  /** Physically moves tags/assignees/participants from source into target -
-   * unlike messages, these are cheap join-table rows, and moving them means
-   * every existing reader (comm-canoe's own dashboard,
-   * listConversationTags/Assignees/Participants) keeps working completely
-   * unmodified, with no new chain-aware read path needed for these three.
-   * conversation_participants has no plain unique index to upsert against
-   * (its two unique indexes are partial, on identity_id/user_id
-   * respectively) so it's deduped in application code instead. */
+  /** Physically moves tags/assignees/participants/personal-tags/read-states
+   * from source into target - unlike messages, these are cheap join-table
+   * rows, and moving them means every existing reader (comm-canoe's own
+   * dashboard, listConversationTags/Assignees/Participants) keeps working
+   * completely unmodified, with no new chain-aware read path needed for
+   * these. conversation_participants has no plain unique index to upsert
+   * against (its two unique indexes are partial, on identity_id/user_id
+   * respectively) so it's deduped in application code instead.
+   *
+   * Read states get special handling: a plain upsert would let a stale
+   * source cursor clobber a fresher target one (or vice versa) for the same
+   * user, so both sides are read first and the newer last_read_at per user
+   * wins - unread status must never regress across a merge. */
   private async moveConversationExtras(sourceId: string, targetId: string): Promise<void> {
-    const [tagsRes, assigneesRes, sourceParticipantsRes, targetParticipantsRes] = await Promise.all([
+    const [
+      tagsRes,
+      assigneesRes,
+      sourceParticipantsRes,
+      targetParticipantsRes,
+      personalTagsRes,
+      sourceReadStatesRes,
+      targetReadStatesRes,
+    ] = await Promise.all([
       this.db.from("conversation_tags").select("tag_id").eq("conversation_id", sourceId),
       this.db.from("conversation_assignees").select("user_id, assigned_by").eq("conversation_id", sourceId),
       this.db.from("conversation_participants").select("identity_id, user_id, role").eq("conversation_id", sourceId),
       this.db.from("conversation_participants").select("identity_id, user_id").eq("conversation_id", targetId),
+      this.db.from("conversation_personal_tags").select("user_id").eq("conversation_id", sourceId),
+      this.db
+        .from("conversation_read_states")
+        .select("user_id, last_read_at, last_read_message_id")
+        .eq("conversation_id", sourceId),
+      this.db
+        .from("conversation_read_states")
+        .select("user_id, last_read_at, last_read_message_id")
+        .eq("conversation_id", targetId),
     ]);
     if (tagsRes.error) throw tagsRes.error;
     if (assigneesRes.error) throw assigneesRes.error;
     if (sourceParticipantsRes.error) throw sourceParticipantsRes.error;
     if (targetParticipantsRes.error) throw targetParticipantsRes.error;
+    if (personalTagsRes.error) throw personalTagsRes.error;
+    if (sourceReadStatesRes.error) throw sourceReadStatesRes.error;
+    if (targetReadStatesRes.error) throw targetReadStatesRes.error;
 
     const tagRows = (tagsRes.data ?? []).map((t) => ({ conversation_id: targetId, tag_id: t.tag_id as string }));
     const assigneeRows = (assigneesRes.data ?? []).map((a) => ({
       conversation_id: targetId,
       user_id: a.user_id as string,
       assigned_by: a.assigned_by as string | null,
+    }));
+    const personalTagRows = (personalTagsRes.data ?? []).map((t) => ({
+      conversation_id: targetId,
+      user_id: t.user_id as string,
     }));
 
     const existingParticipantKeys = new Set(
@@ -1343,7 +1533,24 @@ export class DomainService {
         role: p.role as "external" | "internal",
       }));
 
-    const [tagWrite, assigneeWrite, participantWrite] = await Promise.all([
+    const readStateByUser = new Map<string, { last_read_at: string; last_read_message_id: string | null }>();
+    for (const row of [...(targetReadStatesRes.data ?? []), ...(sourceReadStatesRes.data ?? [])]) {
+      const userId = row.user_id as string;
+      const existing = readStateByUser.get(userId);
+      if (!existing || new Date(row.last_read_at as string) > new Date(existing.last_read_at)) {
+        readStateByUser.set(userId, {
+          last_read_at: row.last_read_at as string,
+          last_read_message_id: row.last_read_message_id as string | null,
+        });
+      }
+    }
+    const readStateRows = [...readStateByUser.entries()].map(([userId, state]) => ({
+      conversation_id: targetId,
+      user_id: userId,
+      ...state,
+    }));
+
+    const [tagWrite, assigneeWrite, participantWrite, personalTagWrite, readStateWrite] = await Promise.all([
       tagRows.length
         ? this.db.from("conversation_tags").upsert(tagRows, { onConflict: "conversation_id,tag_id" })
         : { error: null },
@@ -1353,19 +1560,33 @@ export class DomainService {
       participantRows.length
         ? this.db.from("conversation_participants").insert(participantRows)
         : { error: null },
+      personalTagRows.length
+        ? this.db
+            .from("conversation_personal_tags")
+            .upsert(personalTagRows, { onConflict: "conversation_id,user_id" })
+        : { error: null },
+      readStateRows.length
+        ? this.db.from("conversation_read_states").upsert(readStateRows, { onConflict: "conversation_id,user_id" })
+        : { error: null },
     ]);
     if (tagWrite.error) throw tagWrite.error;
     if (assigneeWrite.error) throw assigneeWrite.error;
     if (participantWrite.error) throw participantWrite.error;
+    if (personalTagWrite.error) throw personalTagWrite.error;
+    if (readStateWrite.error) throw readStateWrite.error;
 
-    const [delTags, delAssignees, delParticipants] = await Promise.all([
+    const [delTags, delAssignees, delParticipants, delPersonalTags, delReadStates] = await Promise.all([
       this.db.from("conversation_tags").delete().eq("conversation_id", sourceId),
       this.db.from("conversation_assignees").delete().eq("conversation_id", sourceId),
       this.db.from("conversation_participants").delete().eq("conversation_id", sourceId),
+      this.db.from("conversation_personal_tags").delete().eq("conversation_id", sourceId),
+      this.db.from("conversation_read_states").delete().eq("conversation_id", sourceId),
     ]);
     if (delTags.error) throw delTags.error;
     if (delAssignees.error) throw delAssignees.error;
     if (delParticipants.error) throw delParticipants.error;
+    if (delPersonalTags.error) throw delPersonalTags.error;
+    if (delReadStates.error) throw delReadStates.error;
   }
 
   /** Signals comm-canoe's own dashboard (apps/web/src/components/inbox/

@@ -182,6 +182,22 @@ export const resideUpdateConversationStatusInputSchema = z.object({
   status: z.enum(CONVERSATION_STATUSES),
 });
 
+// ---- Per-user read tracking + personal tags (Reside dashboard unread/relevance) ----
+export const resideMarkReadInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  actor: resideActorSchema,
+});
+
+export const residePersonalTagInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  actor: resideActorSchema,
+  target: resideActorSchema,
+});
+
+export const resideRemovePersonalTagInputSchema = z.object({
+  tenantId: z.string().uuid(),
+});
+
 // ---- Phase 4: resident-facing conversation endpoints ----
 // The actor here is the resident themselves, identified by phone/email
 // (matching however comm-canoe already resolves identities for outbound
@@ -255,6 +271,8 @@ export type ResideAddTagInput = z.infer<typeof resideAddTagInputSchema>;
 export type ResideAssigneeInput = z.infer<typeof resideAssigneeInputSchema>;
 export type ResideParticipantInput = z.infer<typeof resideParticipantInputSchema>;
 export type ResideConversationReplyInput = z.infer<typeof resideConversationReplyInputSchema>;
+export type ResideMarkReadInput = z.infer<typeof resideMarkReadInputSchema>;
+export type ResidePersonalTagInput = z.infer<typeof residePersonalTagInputSchema>;
 
 export type AppendMessageInput = z.infer<typeof appendMessageInputSchema>;
 export type IdentityContact = z.infer<typeof identityContactSchema>;

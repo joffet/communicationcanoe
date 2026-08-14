@@ -2,6 +2,7 @@ import { createAdminService, createDomainService } from "@communication-canoe/da
 import { CONVERSATION_STATUSES } from "@communication-canoe/shared/constants";
 import { z } from "zod";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
+import { findResideActorUserId } from "@/lib/reside/resolve-actor";
 
 export async function GET(request: Request) {
   if (!verifyResideSecret(request)) {
@@ -22,6 +23,7 @@ export async function GET(request: Request) {
     : undefined;
   const assigneeUserId = url.searchParams.get("assigneeUserId") ?? undefined;
   const tagId = url.searchParams.get("tagId") ?? undefined;
+  const viewerResideUserId = url.searchParams.get("viewerResideUserId") ?? undefined;
   const limitParam = Number(url.searchParams.get("limit"));
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 50;
 
@@ -46,5 +48,28 @@ export async function GET(request: Request) {
     conversations = conversations.filter((c) => c.tags.some((t) => t.id === tagId));
   }
 
-  return Response.json({ conversations });
+  // viewerResideUserId is a lookup only, never a create - a reside admin
+  // requesting their own dashboard/inbox list who has never touched a
+  // conversation simply sees viewer_is_relevant: false on everything.
+  if (!viewerResideUserId) {
+    return Response.json({ conversations });
+  }
+  const viewerUserId = await findResideActorUserId(viewerResideUserId);
+  if (!viewerUserId) {
+    const unresolved = conversations.map((c) => ({
+      ...c,
+      viewer_is_relevant: false,
+      viewer_has_unread: false,
+      viewer_last_read_at: null,
+    }));
+    return Response.json({ conversations: unresolved });
+  }
+
+  const viewerStates = await domain.getViewerConversationStates(conversations, viewerUserId);
+  const enriched = conversations.map((c) => ({
+    ...c,
+    ...(viewerStates.get(c.id) ?? { viewer_is_relevant: false, viewer_has_unread: false, viewer_last_read_at: null }),
+  }));
+
+  return Response.json({ conversations: enriched });
 }
