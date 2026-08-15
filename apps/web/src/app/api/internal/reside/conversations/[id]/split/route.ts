@@ -14,12 +14,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!parsed.success) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { tenantId, actor, messageId } = parsed.data;
+  // reside's own client uid, which may be a slug - splitConversation keys on
+  // the `tenant_id` uuid column, so it takes the guard's resolved id instead.
+  const { tenantId: resideClientUid, actor, messageId } = parsed.data;
 
-  const guard = await resolveTenantScopedConversation(tenantId, id);
+  const guard = await resolveTenantScopedConversation(resideClientUid, id);
   if (!guard.ok) return new Response("Unknown conversation", { status: guard.status });
 
-  const { userId: actorUserId } = await resolveOrCreateResideActor({ ...actor, resideClientUid: tenantId });
+  const { userId: actorUserId } = await resolveOrCreateResideActor({ ...actor, resideClientUid });
 
   try {
     // Write against the resolved canonical id (Phase 7 merge redirect) -
@@ -27,7 +29,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // concurrent merge, but starting from the guard's already-resolved id
     // avoids a pointless split-then-abort in the common case.
     const newConversationId = await createDomainService().splitConversation(
-      tenantId,
+      guard.tenant.id,
       guard.conversation.id,
       messageId,
       actorUserId,

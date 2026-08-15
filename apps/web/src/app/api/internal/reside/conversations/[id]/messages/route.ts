@@ -16,18 +16,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!parsed.success) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { tenantId, actor, channel, body, visibility } = parsed.data;
+  // reside sends its OWN client uid here, which may be a slug (e.g. "cardiff").
+  // Every domain call below keys on the `tenant_id` uuid column, so they take
+  // the guard's resolved `tenant.id` instead - never this value.
+  const { tenantId: resideClientUid, actor, channel, body, visibility } = parsed.data;
 
-  const guard = await resolveTenantScopedConversation(tenantId, id);
+  const guard = await resolveTenantScopedConversation(resideClientUid, id);
   if (!guard.ok) return new Response("Unknown conversation", { status: guard.status });
 
+  const commCanoeTenantId = guard.tenant.id;
   const domain = createDomainService();
-  const { userId: actorUserId } = await resolveOrCreateResideActor({ ...actor, resideClientUid: tenantId });
+  const { userId: actorUserId } = await resolveOrCreateResideActor({ ...actor, resideClientUid });
 
   if (visibility === "internal") {
     // Write against the resolved canonical id (Phase 7 merge redirect).
     const message = await domain.appendMessage({
-      tenantId,
+      tenantId: commCanoeTenantId,
       conversationId: guard.conversation.id,
       channel,
       direction: "outbound",
@@ -45,13 +49,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // due, gated on ai_review_status = 'approved' (Phase 6) - the
   // tone-review-worker picks up 'pending' messages and transitions them
   // before the delay elapses.
-  const settings = await domain.getTenantSettings(tenantId);
+  const settings = await domain.getTenantSettings(commCanoeTenantId);
   const delaySeconds = settings?.external_send_delay_seconds ?? DEFAULT_EXTERNAL_SEND_DELAY_SECONDS;
   const scheduledSendAt = new Date(Date.now() + delaySeconds * 1000).toISOString();
 
   // Write against the resolved canonical id (Phase 7 merge redirect).
   const message = await domain.appendMessage({
-    tenantId,
+    tenantId: commCanoeTenantId,
     conversationId: guard.conversation.id,
     channel,
     direction: "outbound",

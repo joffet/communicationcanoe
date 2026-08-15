@@ -14,11 +14,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!parsed.success) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { tenantId, actor, targetConversationId } = parsed.data;
+  // reside's own client uid, which may be a slug - mergeConversations keys on
+  // the `tenant_id` uuid column, so it takes the guard's resolved id instead.
+  const { tenantId: resideClientUid, actor, targetConversationId } = parsed.data;
 
   const [sourceGuard, targetGuard] = await Promise.all([
-    resolveTenantScopedConversation(tenantId, id),
-    resolveTenantScopedConversation(tenantId, targetConversationId),
+    resolveTenantScopedConversation(resideClientUid, id),
+    resolveTenantScopedConversation(resideClientUid, targetConversationId),
   ]);
   if (!sourceGuard.ok) return new Response("Unknown conversation", { status: sourceGuard.status });
   if (!targetGuard.ok) return new Response("Unknown target conversation", { status: targetGuard.status });
@@ -26,11 +28,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // Resolved for consistency with every other actor-attributed write in this
   // API - nothing currently stores a per-merge audit log (no requirement
   // surfaced for one), so the resolved id isn't threaded further yet.
-  await resolveOrCreateResideActor({ ...actor, resideClientUid: tenantId });
+  await resolveOrCreateResideActor({ ...actor, resideClientUid });
 
   try {
     const mergedConversationId = await createDomainService().mergeConversations(
-      tenantId,
+      sourceGuard.tenant.id,
       id,
       targetConversationId,
     );

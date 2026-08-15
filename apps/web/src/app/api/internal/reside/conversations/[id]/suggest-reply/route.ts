@@ -13,18 +13,22 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
 
   const { id } = await params;
-  const tenantId = new URL(request.url).searchParams.get("tenantId");
-  if (!tenantId) {
+  // reside's own client uid, which may be a slug - the settings/examples/chunk
+  // lookups below key on the `tenant_id` uuid column, so they take the guard's
+  // resolved id instead.
+  const resideClientUid = new URL(request.url).searchParams.get("tenantId");
+  if (!resideClientUid) {
     return Response.json({ error: "tenantId is required" }, { status: 400 });
   }
 
-  const guard = await resolveTenantScopedConversation(tenantId, id);
+  const guard = await resolveTenantScopedConversation(resideClientUid, id);
   if (!guard.ok) return new Response("Unknown conversation", { status: guard.status });
 
+  const commCanoeTenantId = guard.tenant.id;
   const domain = createDomainService();
   const [settings, examples] = await Promise.all([
-    domain.getTenantSettings(tenantId),
-    domain.getResolvedConversationExamples(tenantId),
+    domain.getTenantSettings(commCanoeTenantId),
+    domain.getResolvedConversationExamples(commCanoeTenantId),
   ]);
 
   const faqRaw = settings?.faq_snippets;
@@ -41,7 +45,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     try {
       const embeddingProvider = createEmbeddingProvider();
       const [queryEmbedding] = await embeddingProvider.embed([latestInbound.body]);
-      const chunks = await domain.findSimilarChunks(tenantId, queryEmbedding);
+      const chunks = await domain.findSimilarChunks(commCanoeTenantId, queryEmbedding);
       retrievedChunks = chunks.map((c) => ({ heading: c.heading, content: c.content }));
     } catch (err) {
       // Retrieval is a best-effort enhancement, not a hard dependency -
