@@ -301,6 +301,9 @@ export type MessageRow = {
   audio_url: string | null;
   transcript: string | null;
   ai_summary: string | null;
+  /** Set only on reside-originated sends, so reside's durable retry queue can
+   * safely re-send after a lost response without delivering twice. */
+  idempotency_key: string | null;
   provider_message_id: string | null;
   delivery_status: MessageDeliveryStatus | null;
   delivery_error: string | null;
@@ -331,6 +334,7 @@ export type MessageInsert = {
   audio_url?: string | null;
   transcript?: string | null;
   ai_summary?: string | null;
+  idempotency_key?: string | null;
   provider_message_id?: string | null;
   delivery_status?: MessageDeliveryStatus | null;
   delivery_error?: string | null;

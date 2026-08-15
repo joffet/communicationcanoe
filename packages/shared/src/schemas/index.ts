@@ -13,6 +13,9 @@ import {
 
 export const appendMessageInputSchema = z.object({
   tenantId: z.string().uuid(),
+  /** Set by reside-originated sends so its durable retry queue can re-send
+   * after a lost response without delivering the message twice. */
+  idempotencyKey: z.string().min(1).optional(),
   conversationId: z.string().uuid(),
   channel: z.enum(MESSAGE_CHANNELS),
   direction: z.enum(MESSAGE_DIRECTIONS),
@@ -104,6 +107,11 @@ export const resideSendMessageInputSchema = z
     body: z.string().min(1),
     subject: z.string().optional(),
     conversationId: z.string().uuid().optional(),
+    /** Stable per logical message, reused across reside's retries. When a
+     * message with this key already exists for the tenant the endpoint returns
+     * it untouched instead of sending again - this is what makes reside's
+     * durable retry safe after a lost/timed-out response. */
+    idempotencyKey: z.string().min(1).max(200).optional(),
   })
   .refine((data) => Boolean(data.identity.phone || data.identity.email), {
     message: "identity requires at least one of phone or email",

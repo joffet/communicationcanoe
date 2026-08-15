@@ -499,6 +499,7 @@ export class DomainService {
         audio_url: input.audioUrl ?? null,
         transcript: input.transcript ?? null,
         ai_summary: input.aiSummary ?? null,
+        idempotency_key: input.idempotencyKey ?? null,
         delivery_status: input.deliveryStatus ?? null,
         // Omit the key entirely (not `?? null`) when unset, so the column's
         // NOT NULL DEFAULT 'internal' applies - explicit null would violate it.
@@ -520,6 +521,20 @@ export class DomainService {
       .from("messages")
       .select("*")
       .eq("id", messageId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
+  }
+
+  /** Looks up a prior send by reside's idempotency key. Scoped by tenant to
+   * match the partial unique index, so two tenants can never collide. */
+  async getMessageByIdempotencyKey(tenantId: string, idempotencyKey: string): Promise<Message | null> {
+    const { data, error } = await this.db
+      .from("messages")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("idempotency_key", idempotencyKey)
       .maybeSingle();
 
     if (error) throw error;
