@@ -9,21 +9,23 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
-  const tenantIdParsed = z.string().uuid().safeParse(url.searchParams.get("tenantId"));
-  if (!tenantIdParsed.success) {
-    return Response.json({ error: "tenantId must be a valid uuid" }, { status: 400 });
+  // reside's client uid (may be a slug), resolved to the internal tenant id below.
+  const resideClientUidParsed = z.string().min(1).safeParse(url.searchParams.get("tenantId"));
+  if (!resideClientUidParsed.success) {
+    return Response.json({ error: "tenantId is required" }, { status: 400 });
   }
   const viewerResideUserId = url.searchParams.get("viewerResideUserId");
   if (!viewerResideUserId) {
     return Response.json({ error: "viewerResideUserId is required" }, { status: 400 });
   }
-  const tenantId = tenantIdParsed.data;
+  const resideClientUid = resideClientUidParsed.data;
 
   const admin = createAdminService();
-  const tenant = await admin.getTenantById(tenantId);
+  const tenant = await admin.getTenantByResideClientUid(resideClientUid);
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }
+  const tenantId = tenant.id;
 
   // Lookup only, never creates - a viewer with no comm-canoe user yet has
   // never touched any conversation, so their counts are trivially zero.

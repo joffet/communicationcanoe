@@ -12,12 +12,13 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { tenantId, contact } = parsed.data;
+  const { tenantId: resideClientUid, contact } = parsed.data;
 
-  const tenant = await createAdminService().getTenantById(tenantId);
+  const tenant = await createAdminService().getTenantByResideClientUid(resideClientUid);
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }
+  const tenantId = tenant.id;
 
   // Read-only lookup - a resident who's never contacted the building before
   // has no identity yet, which is a normal empty-inbox state, not an error.

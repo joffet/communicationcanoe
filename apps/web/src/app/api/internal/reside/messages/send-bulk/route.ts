@@ -12,13 +12,14 @@ export async function POST(request: Request) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { tenantId, channel, body, subject, recipients } = parsed.data;
+  const { tenantId: resideClientUid, channel, body, subject, recipients } = parsed.data;
 
   const admin = createAdminService();
-  const tenant = await admin.getTenantById(tenantId);
+  const tenant = await admin.getTenantByResideClientUid(resideClientUid);
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }
+  const tenantId = tenant.id;
 
   const domain = createDomainService();
   const batch = await domain.createOutboundBatch({

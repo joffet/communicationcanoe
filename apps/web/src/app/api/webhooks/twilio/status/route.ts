@@ -1,5 +1,5 @@
 import twilio from "twilio";
-import { createDomainService } from "@communication-canoe/database";
+import { createAdminService, createDomainService } from "@communication-canoe/database";
 import type { MessageDeliveryStatus } from "@communication-canoe/database";
 import { notifyResideIdentityStatus } from "@/lib/reside/identity-status-client";
 
@@ -100,8 +100,14 @@ async function recordOutcomeAndMaybeNotifyReside(
   );
 
   if ((crossedThreshold || clearedFlag) && thread.identity.reside_resident_id) {
+    // message.tenant_id is comm-canoe's internal uuid; reside only recognises
+    // its own client uid, so translate before calling out (mirrors the SES
+    // bounce path in webhooks/ses/notifications).
+    const tenant = await createAdminService().getTenantById(message.tenant_id);
+    if (!tenant) return;
+
     await notifyResideIdentityStatus({
-      resideClientUid: message.tenant_id,
+      resideClientUid: tenant.reside_client_uid,
       resideResidentId: thread.identity.reside_resident_id,
       channel: "sms",
       status: crossedThreshold ? "undeliverable" : "deliverable",

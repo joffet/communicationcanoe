@@ -91,22 +91,24 @@ export type MemberConversationGuardResult =
  * distinguishing "no such conversation" from "wrong resident" from "unknown
  * tenant", matching Phase 3's conversation-guard.ts precedent exactly. */
 export async function resolveOwnedConversation(
-  tenantId: string,
+  resideClientUid: string,
   conversationId: string,
   identityId: string,
 ): Promise<MemberConversationGuardResult> {
-  if (!uuidSchema.safeParse(tenantId).success || !uuidSchema.safeParse(conversationId).success) {
+  // Only conversationId needs a uuid shape check - resideClientUid is reside's
+  // own identifier (possibly a slug) and is compared against a text column.
+  if (!uuidSchema.safeParse(conversationId).success) {
     return { ok: false, status: 404 };
   }
 
   const admin = createAdminService();
   const domain = createDomainService();
 
-  const tenant = await admin.getTenantById(tenantId);
+  const tenant = await admin.getTenantByResideClientUid(resideClientUid);
   if (!tenant) return { ok: false, status: 404 };
 
   const conversation = await domain.getConversationThread(conversationId);
-  if (!conversation || conversation.tenant_id !== tenantId) {
+  if (!conversation || conversation.tenant_id !== tenant.id) {
     return { ok: false, status: 404 };
   }
 

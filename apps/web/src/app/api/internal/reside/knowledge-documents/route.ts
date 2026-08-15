@@ -13,17 +13,17 @@ export async function GET(request: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const tenantId = new URL(request.url).searchParams.get("tenantId");
-  if (!tenantId) {
+  const resideClientUid = new URL(request.url).searchParams.get("tenantId");
+  if (!resideClientUid) {
     return Response.json({ error: "tenantId is required" }, { status: 400 });
   }
 
-  const tenant = await createAdminService().getTenantById(tenantId);
+  const tenant = await createAdminService().getTenantByResideClientUid(resideClientUid);
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }
 
-  const documents = await createDomainService().listDocumentsForTenant(tenantId);
+  const documents = await createDomainService().listDocumentsForTenant(tenant.id);
   return Response.json({ documents });
 }
 
@@ -37,12 +37,13 @@ export async function POST(request: Request) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { tenantId, filename, contentText, extractor, pageCount, uploadedBy } = parsed.data;
+  const { tenantId: resideClientUid, filename, contentText, extractor, pageCount, uploadedBy } = parsed.data;
 
-  const tenant = await createAdminService().getTenantById(tenantId);
+  const tenant = await createAdminService().getTenantByResideClientUid(resideClientUid);
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }
+  const tenantId = tenant.id;
 
   // Re-checked here even though reside enforces the same cap before calling -
   // defense in depth for a new, first-of-its-kind unattended-cost surface

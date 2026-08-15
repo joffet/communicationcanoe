@@ -10,12 +10,15 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
-  const tenantIdParam = url.searchParams.get("tenantId");
-  const tenantIdParsed = z.string().uuid().safeParse(tenantIdParam);
-  if (!tenantIdParsed.success) {
-    return Response.json({ error: "tenantId must be a valid uuid" }, { status: 400 });
+  // This is reside's client uid, which may be a slug - not comm-canoe's tenant
+  // uuid. It is only ever compared against the text reside_client_uid column,
+  // so no uuid shape check applies (and none is needed to keep it out of a
+  // uuid comparison, which was the original reason for validating here).
+  const resideClientUidParsed = z.string().min(1).safeParse(url.searchParams.get("tenantId"));
+  if (!resideClientUidParsed.success) {
+    return Response.json({ error: "tenantId is required" }, { status: 400 });
   }
-  const tenantId = tenantIdParsed.data;
+  const resideClientUid = resideClientUidParsed.data;
 
   const statusParam = url.searchParams.get("status");
   const status = statusParam && (CONVERSATION_STATUSES as readonly string[]).includes(statusParam)
@@ -30,10 +33,11 @@ export async function GET(request: Request) {
   const admin = createAdminService();
   const domain = createDomainService();
 
-  const tenant = await admin.getTenantById(tenantId);
+  const tenant = await admin.getTenantByResideClientUid(resideClientUid);
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }
+  const tenantId = tenant.id;
 
   let conversations = await domain.getConversationsForTenant(tenantId, { status, limit });
 

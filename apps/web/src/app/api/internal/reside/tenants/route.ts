@@ -35,18 +35,20 @@ export async function POST(request: Request) {
   const { resideClientUid, name, twilioNumber, inboundEmailAddress } = parsed.data;
   const admin = createAdminService();
 
-  const existing = await admin.getTenantById(resideClientUid);
+  const existing = await admin.getTenantByResideClientUid(resideClientUid);
   if (existing) {
     return Response.json({ tenant: serializeTenant(existing) });
   }
 
   try {
+    // `id` is left to be generated - reside's uid is stored in its own column
+    // instead, since it may be a slug and `tenants.id` is a uuid.
     const tenant = await admin.createTenant({
-      id: resideClientUid,
       name,
       twilio_number: twilioNumber,
       inbound_email_address: inboundEmailAddress,
       provisioning_source: "reside",
+      reside_client_uid: resideClientUid,
     });
     return Response.json({ tenant: serializeTenant(tenant) });
   } catch (error) {

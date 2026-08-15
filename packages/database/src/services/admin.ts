@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { generateWidgetKey } from "./chat-session";
 import type { AppSupabaseClient } from "../client";
 import { createServiceClient, normalizeEmail, normalizePhone } from "../client";
@@ -78,25 +79,47 @@ export class AdminService {
     return data;
   }
 
+  /** Resolves a tenant by reside's own client identifier - the value reside sends
+   * on every inbound request. Use this (never getTenantById) for anything driven
+   * by a reside-supplied uid: that uid may be a slug like "cardiff", and
+   * getTenantById compares against a uuid column, which Postgres rejects with a
+   * cast error rather than simply not matching. */
+  async getTenantByResideClientUid(resideClientUid: string): Promise<Tenant | null> {
+    const { data, error } = await this.db
+      .from("tenants")
+      .select("*")
+      .eq("reside_client_uid", resideClientUid)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
+  }
+
   async createTenant(input: {
     id?: string;
     name: string;
     twilio_number: string;
     inbound_email_address: string;
     provisioning_source?: "manual" | "reside";
+    /** reside's client uid. Defaults to `id` only for manually-created tenants
+     * that predate the split; reside-provisioned tenants always pass it. */
+    reside_client_uid?: string;
   }): Promise<Tenant> {
     const twilio_number = normalizePhone(input.twilio_number);
     const inbound_email_address = normalizeEmail(input.inbound_email_address);
+    const id = input.id ?? randomUUID();
+    const reside_client_uid = input.reside_client_uid ?? id;
 
     const { data, error } = await this.db
       .from("tenants")
       .insert({
-        ...(input.id ? { id: input.id } : {}),
+        id,
         name: input.name.trim(),
         twilio_number,
         inbound_email_address,
         chat_widget_key: generateWidgetKey(),
         provisioning_source: input.provisioning_source ?? "manual",
+        reside_client_uid,
       })
       .select("*")
       .single();

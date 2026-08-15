@@ -1,4 +1,4 @@
-import { createDomainService } from "@communication-canoe/database";
+import { createAdminService, createDomainService } from "@communication-canoe/database";
 import { notifyResideResponseOverdue } from "../reside/notify-response-overdue.js";
 
 const POLL_INTERVAL_MS = 5 * 60_000;
@@ -27,6 +27,7 @@ export function startOverdueConversationWorker(): void {
 
 async function notifyOverdueConversations(): Promise<void> {
   const domain = createDomainService();
+  const admin = createAdminService();
 
   const ids = await domain.listOverdueConversationIds(BATCH_LIMIT);
   if (ids.length === 0) return;
@@ -45,8 +46,13 @@ async function notifyOverdueConversations(): Promise<void> {
       const thread = await domain.getConversationThread(claimed.id);
       const who = thread?.identity.name ?? thread?.identity.email ?? thread?.identity.phone ?? "a resident";
 
+      // claimed.tenant_id is comm-canoe's internal uuid - reside matches on its
+      // own client uid, so translate before notifying.
+      const tenant = await admin.getTenantById(claimed.tenant_id);
+      if (!tenant) continue;
+
       await notifyResideResponseOverdue({
-        resideClientUid: claimed.tenant_id,
+        resideClientUid: tenant.reside_client_uid,
         conversationId: claimed.id,
         summary: `Response overdue for ${who}`,
       });

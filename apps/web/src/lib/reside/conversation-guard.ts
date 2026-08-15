@@ -15,28 +15,33 @@ export type ConversationGuardResult =
  * from "wrong tenant") - conversation ids are opaque UUIDs an attacker could
  * otherwise probe across tenants.
  *
- * Both ids are validated as UUIDs before hitting Postgres - `id`/`tenantId`
- * columns are `uuid` type, so a malformed value (e.g. reside's slug-style
- * client ids like "cardiff" for tenants never provisioned into comm-canoe)
- * would otherwise throw an unhandled type-cast error from the query layer
- * instead of a clean 404. Found via live Phase 3 verification.
+ * `conversationId` is still validated as a UUID before hitting Postgres - that
+ * column is `uuid` type, so a malformed value would otherwise throw an
+ * unhandled type-cast error from the query layer instead of a clean 404.
+ * Found via live Phase 3 verification.
+ *
+ * `resideClientUid` deliberately is NOT uuid-checked: it is reside's own client
+ * identifier and may be a slug (e.g. "cardiff"). It is only ever compared
+ * against the text `tenants.reside_client_uid` column, so it can never reach a
+ * uuid comparison - which is what the old check was guarding against. Tenant
+ * scoping below uses the resolved `tenant.id`, never this value.
  */
 export async function resolveTenantScopedConversation(
-  tenantId: string,
+  resideClientUid: string,
   conversationId: string,
 ): Promise<ConversationGuardResult> {
-  if (!uuidSchema.safeParse(tenantId).success || !uuidSchema.safeParse(conversationId).success) {
+  if (!uuidSchema.safeParse(conversationId).success) {
     return { ok: false, status: 404 };
   }
 
   const admin = createAdminService();
   const domain = createDomainService();
 
-  const tenant = await admin.getTenantById(tenantId);
+  const tenant = await admin.getTenantByResideClientUid(resideClientUid);
   if (!tenant) return { ok: false, status: 404 };
 
   const conversation = await domain.getConversationThread(conversationId);
-  if (!conversation || conversation.tenant_id !== tenantId) {
+  if (!conversation || conversation.tenant_id !== tenant.id) {
     return { ok: false, status: 404 };
   }
 

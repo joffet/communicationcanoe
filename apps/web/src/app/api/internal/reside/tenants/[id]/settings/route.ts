@@ -14,13 +14,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const { id } = await params;
-  const tenant = await createAdminService().getTenantById(id);
+  // Route segment is reside's client uid, not comm-canoe's tenant uuid.
+  const { id: resideClientUid } = await params;
+  const tenant = await createAdminService().getTenantByResideClientUid(resideClientUid);
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }
 
-  const settings = await createDomainService().getTenantSettings(id);
+  const settings = await createDomainService().getTenantSettings(tenant.id);
   const faqRaw = settings?.faq_snippets;
   const faqSnippets = Array.isArray(faqRaw)
     ? (faqRaw as Array<{ q?: string; a?: string }>).map((f) => ({ q: f.q ?? "", a: f.a ?? "" }))
@@ -59,12 +60,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const admin = createAdminService();
-  const tenant = await admin.getTenantById(id);
+  const tenant = await admin.getTenantByResideClientUid(id);
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }
 
-  const settings = await createDomainService().updateTenantSettings(id, {
+  const settings = await createDomainService().updateTenantSettings(tenant.id, {
     ...(defaultResponseWindowMinutes !== undefined && {
       default_response_window_minutes: defaultResponseWindowMinutes,
     }),

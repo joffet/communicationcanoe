@@ -17,13 +17,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!parsed.success) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { tenantId, contact, channel, body } = parsed.data;
+  const { tenantId: resideClientUid, contact, channel, body } = parsed.data;
 
   const admin = createAdminService();
-  const tenant = await admin.getTenantById(tenantId);
+  const tenant = await admin.getTenantByResideClientUid(resideClientUid);
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }
+  const tenantId = tenant.id;
 
   const domain = createDomainService();
   // The one legitimate creation path in Phase 4 - a genuinely first-time
@@ -66,7 +67,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   });
 
   void notifyResideActivity({
-    resideClientUid: tenantId,
+    // reside's own identifier, NOT tenantId - reside matches this against its
+    // own client records and would never recognise comm-canoe's internal uuid.
+    resideClientUid: tenant.reside_client_uid,
     conversationId: id,
     summary: `New message from ${identity.name ?? identity.email ?? identity.phone ?? "a resident"}`,
   });

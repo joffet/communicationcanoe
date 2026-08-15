@@ -13,7 +13,9 @@ export async function POST(request: Request) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { tenantId, channel, identity, body, subject, conversationId } = parsed.data;
+  // reside sends its own client uid in this field - resolved to comm-canoe's
+  // internal tenant id below, which is what every tenant_id column stores.
+  const { tenantId: resideClientUid, channel, identity, body, subject, conversationId } = parsed.data;
 
   const to = channel === "sms" ? identity.phone : identity.email;
   if (!to) {
@@ -26,10 +28,11 @@ export async function POST(request: Request) {
   const admin = createAdminService();
   const domain = createDomainService();
 
-  const tenant = await admin.getTenantById(tenantId);
+  const tenant = await admin.getTenantByResideClientUid(resideClientUid);
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }
+  const tenantId = tenant.id;
 
   const resolvedIdentity = await domain.findOrCreateIdentity(tenantId, identity);
 

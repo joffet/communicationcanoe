@@ -77,7 +77,17 @@ export async function resolveOrCreateResideActor(
   }
 
   const admin = createAdminService();
-  await admin.upsertTenantMembership(userId, claims.resideClientUid, mapTenantRole(claims.role));
+  // NOTE: the `"user"."resideClientUid"` write above deliberately stores reside's
+  // own identifier (it is a plain text better-auth additionalField recording who
+  // the actor is on reside's side). This membership row is the opposite: its
+  // tenant_id is a uuid FK into tenants, so it must carry comm-canoe's internal
+  // id. Passing claims.resideClientUid here would be a uuid cast error for a
+  // slug uid, or an FK violation for a uuid one.
+  const tenant = await admin.getTenantByResideClientUid(claims.resideClientUid);
+  if (!tenant) {
+    throw new Error(`No comm-canoe tenant for reside client ${claims.resideClientUid}`);
+  }
+  await admin.upsertTenantMembership(userId, tenant.id, mapTenantRole(claims.role));
 
   return { userId };
 }

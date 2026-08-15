@@ -72,6 +72,11 @@ export type TenantRow = {
   inbound_email_address: string;
   chat_widget_key: string;
   provisioning_source: TenantProvisioningSource;
+  /** reside's own client identifier - may be a slug (e.g. "cardiff"), not just a
+   * UUID. This is what reside sends inbound and expects echoed back outbound;
+   * `id` above is comm-canoe's internal key that every tenant_id FK points at.
+   * The two are equal only for tenants provisioned before they were decoupled. */
+  reside_client_uid: string;
   created_at: string;
 };
 
@@ -82,6 +87,7 @@ export type TenantInsert = {
   inbound_email_address: string;
   chat_widget_key?: string;
   provisioning_source?: TenantProvisioningSource;
+  reside_client_uid: string;
   created_at?: string;
 };
 
