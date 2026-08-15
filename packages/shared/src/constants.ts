@@ -17,7 +17,9 @@ export const TENANT_PROVISIONING_SOURCES = ["manual", "reside"] as const;
 export const MESSAGE_VISIBILITIES = ["internal", "external"] as const;
 export const MESSAGE_AI_REVIEW_STATUSES = ["pending", "approved", "flagged"] as const;
 export const MESSAGE_TOPIC_CHECK_STATUSES = ["pending", "processing", "reviewed"] as const;
-export const MESSAGE_TRANSCRIPTION_STATUSES = ["pending", "ready", "failed"] as const;
+/** "transcribing" is a claim held by one worker replica while it does the
+ * expensive OpenAI call - see claimVoicemailTranscription. */
+export const MESSAGE_TRANSCRIPTION_STATUSES = ["pending", "transcribing", "ready", "failed"] as const;
 export const CONVERSATION_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 
 export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number];

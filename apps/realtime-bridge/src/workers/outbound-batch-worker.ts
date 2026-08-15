@@ -3,6 +3,11 @@ import { dispatchOutboundMessage } from "@communication-canoe/messaging";
 
 const POLL_INTERVAL_MS = 7_000;
 const BATCH_LIMIT = 25;
+/** How long a claimed ("sending") recipient may sit unresolved before another
+ * tick assumes the claiming replica died and returns it to pending. Well above
+ * the time a single dispatch takes, so a slow-but-alive send is never stolen
+ * and re-dispatched. */
+const STUCK_CLAIM_TIMEOUT_MS = 5 * 60_000;
 
 /**
  * Drains reside's bulk-send queue (outbound_batches/outbound_batch_recipients -
@@ -29,6 +34,14 @@ async function drainPendingRecipients(): Promise<void> {
   const domain = createDomainService();
   const admin = createAdminService();
 
+  // Put back anything a previous replica claimed but died before resolving.
+  const reclaimed = await domain.reclaimStuckOutboundBatchRecipients(
+    new Date(Date.now() - STUCK_CLAIM_TIMEOUT_MS).toISOString(),
+  );
+  if (reclaimed > 0) {
+    console.log(`[outbound-batch-worker] reclaimed ${reclaimed} stuck recipient(s)`);
+  }
+
   const recipients = await domain.listPendingOutboundBatchRecipients(BATCH_LIMIT);
   if (recipients.length === 0) return;
 
@@ -41,6 +54,13 @@ async function drainPendingRecipients(): Promise<void> {
 
   for (const recipient of recipients) {
     try {
+      // Claim BEFORE any send. Without this two replicas both read the same
+      // pending rows and both dispatch - on a Notice to hundreds of residents,
+      // hundreds of duplicate emails. A lost claim just means another replica
+      // owns this recipient.
+      const claimed = await domain.claimOutboundBatchRecipient(recipient.id);
+      if (!claimed) continue;
+
       let tenant = tenantCache.get(recipient.tenant_id);
       if (tenant === undefined) {
         tenant = await admin.getTenantById(recipient.tenant_id);

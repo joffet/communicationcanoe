@@ -35,6 +35,12 @@ async function transcribePendingVoicemails(): Promise<void> {
 
   for (const id of ids) {
     try {
+      // Claim before the OpenAI call so two replicas can't both transcribe the
+      // same voicemail (correctness is unaffected either way, but the spend
+      // and the duplicate write are not).
+      const claimed = await domain.claimVoicemailTranscription(id);
+      if (!claimed) continue;
+
       const message = await domain.getMessageById(id);
       if (!message || !message.audio_url) {
         await domain.markMessageTranscriptionFailed(id, "No audio_url on message");

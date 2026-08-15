@@ -286,7 +286,9 @@ export type MessageDeliveryStatus =
 export type MessageVisibility = "internal" | "external";
 export type MessageAiReviewStatus = "pending" | "approved" | "flagged";
 export type MessageTopicCheckStatus = "pending" | "processing" | "reviewed";
-export type MessageTranscriptionStatus = "pending" | "ready" | "failed";
+/** Kept in sync with MESSAGE_TRANSCRIPTION_STATUSES in @communication-canoe/shared.
+ * "transcribing" is a claim held by one worker replica during the OpenAI call. */
+export type MessageTranscriptionStatus = "pending" | "transcribing" | "ready" | "failed";
 
 export type MessageRow = {
   id: string;
@@ -424,7 +426,9 @@ export type OutboundBatchInsert = {
   completed_at?: string | null;
 };
 
-export type OutboundBatchRecipientStatus = "pending" | "sent" | "failed";
+/** "sending" is a claim held by one worker replica between picking a
+ * recipient up and resolving it - see claimOutboundBatchRecipient. */
+export type OutboundBatchRecipientStatus = "pending" | "sending" | "sent" | "failed";
 
 export type OutboundBatchRecipientRow = {
   id: string;
@@ -436,6 +440,7 @@ export type OutboundBatchRecipientRow = {
   status: OutboundBatchRecipientStatus;
   message_id: string | null;
   error: string | null;
+  claimed_at: string | null;
   created_at: string;
 };
 
@@ -449,6 +454,7 @@ export type OutboundBatchRecipientInsert = {
   status?: OutboundBatchRecipientStatus;
   message_id?: string | null;
   error?: string | null;
+  claimed_at?: string | null;
   created_at?: string;
 };
 

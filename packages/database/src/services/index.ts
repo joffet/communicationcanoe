@@ -805,6 +805,36 @@ export class DomainService {
     return data ?? [];
   }
 
+  /** Atomically claims a recipient for one worker replica: pending -> sending.
+   * Returns null when another replica got there first, which is the entire
+   * double-send guard for bulk Notices. Mirrors claimScheduledMessage. */
+  async claimOutboundBatchRecipient(recipientId: string): Promise<OutboundBatchRecipient | null> {
+    const { data, error } = await this.db
+      .from("outbound_batch_recipients")
+      .update({ status: "sending", claimed_at: new Date().toISOString() })
+      .eq("id", recipientId)
+      .eq("status", "pending")
+      .select("*")
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
+  }
+
+  /** Returns claimed recipients whose replica died before resolving them, so a
+   * later tick can put them back to pending. */
+  async reclaimStuckOutboundBatchRecipients(olderThanIso: string): Promise<number> {
+    const { data, error } = await this.db
+      .from("outbound_batch_recipients")
+      .update({ status: "pending", claimed_at: null })
+      .eq("status", "sending")
+      .lt("claimed_at", olderThanIso)
+      .select("id");
+
+    if (error) throw error;
+    return (data ?? []).length;
+  }
+
   async updateOutboundBatchRecipientStatus(
     recipientId: string,
     patch: { status: "sent" | "failed"; messageId?: string; error?: string | null },
@@ -2395,6 +2425,22 @@ export class DomainService {
   }
 
   // ---- Voicemail transcription (Phase 11) ----
+
+  /** Atomically claims a voicemail for transcription: pending -> transcribing.
+   * Returns false when another replica got there first, so the expensive
+   * OpenAI call happens exactly once per voicemail across all replicas. */
+  async claimVoicemailTranscription(messageId: string): Promise<boolean> {
+    const { data, error } = await this.db
+      .from("messages")
+      .update({ transcription_status: "transcribing" })
+      .eq("id", messageId)
+      .eq("transcription_status", "pending")
+      .select("id")
+      .maybeSingle();
+
+    if (error) throw error;
+    return Boolean(data);
+  }
 
   async listPendingVoicemailTranscriptionMessageIds(limit: number): Promise<string[]> {
     const { data, error } = await this.db
