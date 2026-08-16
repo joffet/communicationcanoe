@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createDomainService } from "@communication-canoe/database";
+import { createAdminService, createDomainService } from "@communication-canoe/database";
 import { resideCancelScheduledMessageInputSchema } from "@communication-canoe/shared/schemas";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
 
@@ -22,8 +22,16 @@ export async function POST(
   }
 
   const domain = createDomainService();
+  // parsed.data.tenantId is reside's client uid (possibly a slug); messages
+  // store comm-canoe's internal uuid, so resolve before comparing. Comparing
+  // the two directly silently 404s every request once they diverged.
+  const tenant = await createAdminService().getTenantByResideClientUid(parsed.data.tenantId);
+  if (!tenant) {
+    return new Response("Unknown message", { status: 404 });
+  }
+
   const existing = await domain.getMessageById(messageId);
-  if (!existing || existing.tenant_id !== parsed.data.tenantId) {
+  if (!existing || existing.tenant_id !== tenant.id) {
     return new Response("Unknown message", { status: 404 });
   }
 
