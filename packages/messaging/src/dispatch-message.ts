@@ -19,11 +19,20 @@ function withOpenTrackingPixel(html: string, messageId: string): string {
  * Only for admin conversation replies (sender_type 'internal_user') - every
  * other outbound path (Notices, system sends) uses 'system' and is
  * untouched. Best-effort: a missing RESIDE_APP_URL just omits the link. */
-function withMemberPortalLink(html: string, conversationId: string): string {
-  const resideAppUrl = process.env.RESIDE_APP_URL;
+function withMemberPortalLink(
+  html: string,
+  conversationId: string,
+  tenant?: { reside_app_url?: string | null } | null,
+): string {
+  // Prefer this client's own reside host (derived from its routingDomain) so a
+  // One Cardiff resident is sent to One Cardiff's portal, not a shared one. The
+  // env var remains the fallback for tenants provisioned before reside_app_url
+  // existed, or clients with no routing domain configured.
+  const resideAppUrl = tenant?.reside_app_url || process.env.RESIDE_APP_URL;
   if (!resideAppUrl) return html;
 
-  const link = `<p><a href="${resideAppUrl}/member/inbox/${conversationId}">View and reply</a></p>`;
+  const base = resideAppUrl.replace(/\/+$/, "");
+  const link = `<p><a href="${base}/member/inbox/${conversationId}">View and reply</a></p>`;
   return `${html}${link}`;
 }
 
@@ -54,7 +63,7 @@ export async function dispatchOutboundMessage(params: {
     if (message.channel === "email") {
       let html = withOpenTrackingPixel(message.body, message.id);
       if (message.sender_type === "internal_user") {
-        html = withMemberPortalLink(html, message.conversation_id);
+        html = withMemberPortalLink(html, message.conversation_id, tenant);
       }
       const result = await sendTenantReplyEmail({
         to,

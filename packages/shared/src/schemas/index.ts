@@ -97,6 +97,10 @@ export const provisionTenantInputSchema = z.object({
   name: z.string().min(1),
   twilioNumber: z.string().min(1),
   inboundEmailAddress: z.string().email(),
+  /** This client's reside portal base URL, for per-client "View and reply"
+   * links in resident emails. reside derives it from routingDomain and owns
+   * the normalization; comm-canoe only appends a path. */
+  resideAppUrl: z.string().url().optional(),
 });
 
 export const resideSendMessageInputSchema = z

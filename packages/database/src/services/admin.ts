@@ -95,6 +95,17 @@ export class AdminService {
     return data;
   }
 
+  /** Keeps comm-canoe's copy of the client's portal URL in step when a reside
+   * admin edits their routing domain. Idempotent; safe to call on every save. */
+  async updateTenantResideAppUrl(resideClientUid: string, resideAppUrl: string | null): Promise<void> {
+    const { error } = await this.db
+      .from("tenants")
+      .update({ reside_app_url: resideAppUrl })
+      .eq("reside_client_uid", resideClientUid);
+
+    if (error) throw error;
+  }
+
   async createTenant(input: {
     id?: string;
     name: string;
@@ -104,6 +115,7 @@ export class AdminService {
     /** reside's client uid. Defaults to `id` only for manually-created tenants
      * that predate the split; reside-provisioned tenants always pass it. */
     reside_client_uid?: string;
+    reside_app_url?: string | null;
   }): Promise<Tenant> {
     const twilio_number = normalizePhone(input.twilio_number);
     const inbound_email_address = normalizeEmail(input.inbound_email_address);
@@ -120,6 +132,7 @@ export class AdminService {
         chat_widget_key: generateWidgetKey(),
         provisioning_source: input.provisioning_source ?? "manual",
         reside_client_uid,
+        reside_app_url: input.reside_app_url ?? null,
       })
       .select("*")
       .single();

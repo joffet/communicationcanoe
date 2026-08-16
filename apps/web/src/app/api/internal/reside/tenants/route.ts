@@ -7,6 +7,7 @@ function serializeTenant(tenant: {
   name: string;
   twilio_number: string;
   inbound_email_address: string;
+  reside_app_url: string | null;
   chat_widget_key: string;
   provisioning_source: string;
   created_at: string;
@@ -16,6 +17,7 @@ function serializeTenant(tenant: {
     name: tenant.name,
     twilioNumber: tenant.twilio_number,
     inboundEmailAddress: tenant.inbound_email_address,
+    resideAppUrl: tenant.reside_app_url,
     chatWidgetKey: tenant.chat_widget_key,
     provisioningSource: tenant.provisioning_source,
     createdAt: tenant.created_at,
@@ -32,11 +34,19 @@ export async function POST(request: Request) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { resideClientUid, name, twilioNumber, inboundEmailAddress } = parsed.data;
+  const { resideClientUid, name, twilioNumber, inboundEmailAddress, resideAppUrl } = parsed.data;
   const admin = createAdminService();
 
   const existing = await admin.getTenantByResideClientUid(resideClientUid);
   if (existing) {
+    // Provisioning is idempotent, but the portal URL can legitimately change
+    // later (an admin edits their routing domain), so keep it in step rather
+    // than returning a stale value.
+    if (resideAppUrl !== undefined && resideAppUrl !== existing.reside_app_url) {
+      await admin.updateTenantResideAppUrl(resideClientUid, resideAppUrl);
+      const refreshed = await admin.getTenantByResideClientUid(resideClientUid);
+      if (refreshed) return Response.json({ tenant: serializeTenant(refreshed) });
+    }
     return Response.json({ tenant: serializeTenant(existing) });
   }
 
@@ -49,6 +59,7 @@ export async function POST(request: Request) {
       inbound_email_address: inboundEmailAddress,
       provisioning_source: "reside",
       reside_client_uid: resideClientUid,
+      reside_app_url: resideAppUrl ?? null,
     });
     return Response.json({ tenant: serializeTenant(tenant) });
   } catch (error) {

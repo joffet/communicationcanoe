@@ -77,6 +77,11 @@ export type TenantRow = {
    * `id` above is comm-canoe's internal key that every tenant_id FK points at.
    * The two are equal only for tenants provisioned before they were decoupled. */
   reside_client_uid: string;
+  /** Full base URL of this client's reside portal (e.g. https://onecardiff.ca),
+   * derived by reside from ResideClient.routingDomain. Used for the
+   * "View and reply" link in resident emails; null falls back to the global
+   * RESIDE_APP_URL env var. */
+  reside_app_url: string | null;
   created_at: string;
 };
 
@@ -88,6 +93,7 @@ export type TenantInsert = {
   chat_widget_key?: string;
   provisioning_source?: TenantProvisioningSource;
   reside_client_uid: string;
+  reside_app_url?: string | null;
   created_at?: string;
 };
 
