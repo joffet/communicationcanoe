@@ -130,7 +130,7 @@ export function InboxShell({
                 c.identity.name ??
                 c.identity.phone ??
                 c.identity.email ??
-                (c.identity.is_anonymous ? "Anonymous visitor" : "Unknown");
+                (c.identity.isAnonymous ? "Anonymous visitor" : "Unknown");
               const live = needsHuman.has(c.id);
               return (
                 <li key={c.id}>
@@ -182,7 +182,7 @@ export function InboxShell({
                     {thread.identity.name ??
                       thread.identity.phone ??
                       thread.identity.email ??
-                      (thread.identity.is_anonymous ? "Anonymous visitor" : "Unknown")}
+                      (thread.identity.isAnonymous ? "Anonymous visitor" : "Unknown")}
                   </h2>
                   <p className="text-xs text-zinc-500">
                     {[thread.identity.phone, thread.identity.email].filter(Boolean).join(" · ")}

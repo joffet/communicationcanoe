@@ -6,9 +6,12 @@ import type {
   IdentityContact,
   LogLiveTransferInput,
 } from "@communication-canoe/shared";
-import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { createDb, type Db } from "../db";
 import {
+  identities,
+  identityConversionLogs,
+  identityMergeLogs,
   conversations as conversationsTable,
   conversationAssignees,
   conversationParticipants,
@@ -153,20 +156,12 @@ export class DomainService {
       return this.findOrCreateIdentity(tenantId, { email, name });
     }
 
-    const { data, error } = await this.db
-      .from("identities")
-      .insert({
-        tenant_id: tenantId,
-        phone: null,
-        email: null,
-        name: name ?? null,
-        is_anonymous: true,
-      })
-      .select("*")
-      .single();
+    const [identity] = await this.orm
+      .insert(identities)
+      .values({ tenantId, phone: null, email: null, name: name ?? null, isAnonymous: true })
+      .returning();
 
-    if (error) throw error;
-    return data;
+    return identity;
   }
 
   async convertIdentity(
@@ -180,37 +175,35 @@ export class DomainService {
     const email = input.email ? normalizeEmail(input.email) : undefined;
     const name = input.name?.trim() || undefined;
 
-    const { data: existing, error: fetchError } = await this.db
-      .from("identities")
-      .select("*")
-      .eq("id", identityId)
-      .eq("tenant_id", tenantId)
-      .single();
+    // Scoped by tenant as well as id: an identity id from another tenant must
+    // not be convertible, and the id alone does not establish ownership.
+    const [existing] = await this.orm
+      .select()
+      .from(identities)
+      .where(and(eq(identities.id, identityId), eq(identities.tenantId, tenantId)))
+      .limit(1);
+    if (!existing) throw new Error(`Unknown identity: ${identityId}`);
 
-    if (fetchError) throw fetchError;
-
-    const { data, error } = await this.db
-      .from("identities")
-      .update({
+    const [updated] = await this.orm
+      .update(identities)
+      .set({
         phone: phone ?? existing.phone,
         email: email ?? existing.email,
         name: name ?? existing.name,
-        is_anonymous: false,
+        isAnonymous: false,
       })
-      .eq("id", identityId)
-      .select("*")
-      .single();
+      .where(eq(identities.id, identityId))
+      .returning();
+    const data = updated;
 
-    if (error) throw error;
-
-    await this.db.from("identity_conversion_logs").insert({
-      tenant_id: tenantId,
-      identity_id: identityId,
-      converted_by: convertedBy,
-      converted_by_user_id: convertedByUserId ?? null,
-      captured_name: name ?? existing.name,
-      captured_email: email ?? existing.email,
-      captured_phone: phone ?? existing.phone,
+    await this.orm.insert(identityConversionLogs).values({
+      tenantId,
+      identityId,
+      convertedBy,
+      convertedByUserId: convertedByUserId ?? null,
+      capturedName: name ?? existing.name,
+      capturedEmail: email ?? existing.email,
+      capturedPhone: phone ?? existing.phone,
     });
 
     return data;
@@ -366,40 +359,38 @@ export class DomainService {
 
     if (existing) {
       if (phone && !existing.phone) {
-        await this.db.from("identities").update({ phone }).eq("id", existing.id);
+        await this.orm.update(identities).set({ phone }).where(eq(identities.id, existing.id));
         existing.phone = phone;
       }
       if (email && !existing.email) {
-        await this.db.from("identities").update({ email }).eq("id", existing.id);
+        await this.orm.update(identities).set({ email }).where(eq(identities.id, existing.id));
         existing.email = email;
       }
       if (contact.name && !existing.name) {
-        await this.db.from("identities").update({ name: contact.name }).eq("id", existing.id);
+        await this.orm.update(identities).set({ name: contact.name }).where(eq(identities.id, existing.id));
         existing.name = contact.name;
       }
-      if (contact.resideResidentId && !existing.reside_resident_id) {
-        await this.db
-          .from("identities")
-          .update({ reside_resident_id: contact.resideResidentId })
-          .eq("id", existing.id);
-        existing.reside_resident_id = contact.resideResidentId;
+      if (contact.resideResidentId && !existing.resideResidentId) {
+        await this.orm
+          .update(identities)
+          .set({ resideResidentId: contact.resideResidentId })
+          .where(eq(identities.id, existing.id));
+        existing.resideResidentId = contact.resideResidentId;
       }
       return this.getCanonicalIdentity(existing.id);
     }
 
-    const { data, error } = await this.db
-      .from("identities")
-      .insert({
-        tenant_id: tenantId,
+    const [created] = await this.orm
+      .insert(identities)
+      .values({
+        tenantId,
         phone: phone ?? null,
         email: email ?? null,
         name: contact.name ?? null,
-        reside_resident_id: contact.resideResidentId ?? null,
+        resideResidentId: contact.resideResidentId ?? null,
       })
-      .select("*")
-      .single();
-
-    if (error) throw error;
+      .returning();
+    const data = created;
     return data;
   }
 
@@ -1068,13 +1059,11 @@ export class DomainService {
     if (!conversations?.length) return [];
 
     const identityIds = [...new Set(conversations.map((c) => c.identity_id))];
-    const { data: identities, error: idError } = await this.db
-      .from("identities")
-      .select("*")
-      .in("id", identityIds);
-
-    if (idError) throw idError;
-    const identityMap = new Map((identities ?? []).map((i) => [i.id, i]));
+    const identityRows = await this.orm
+      .select()
+      .from(identities)
+      .where(inArray(identities.id, identityIds));
+    const identityMap = new Map(identityRows.map((i) => [i.id, i]));
     const extrasMap = await this.getConversationExtrasMap(conversations.map((c) => c.id));
 
     return conversations.map((c) => ({
@@ -1089,11 +1078,10 @@ export class DomainService {
    * transitively merged into it. Used both by listConversationsForIdentity
    * below and by the Phase 4 member-conversation-guard's ownership check. */
   async getIdentityMergeChainIds(identityId: string): Promise<string[]> {
-    const { data, error } = await this.db.rpc("identity_merge_chain_ids", {
-      p_identity_id: identityId,
-    });
-    if (error) throw error;
-    return data ?? [];
+    const result = (await this.orm.execute(
+      sql`SELECT * FROM identity_merge_chain_ids(${identityId}::uuid)`,
+    )) as { rows: Array<{ identity_merge_chain_ids: string }> };
+    return result.rows.map((row) => row.identity_merge_chain_ids);
   }
 
   /** Phase 7: given any conversation id (including one that's since been
@@ -1152,13 +1140,11 @@ export class DomainService {
     if (!conversations?.length) return [];
 
     const identityIds = [...new Set(conversations.map((c) => c.identity_id))];
-    const { data: identities, error: idError } = await this.db
-      .from("identities")
-      .select("*")
-      .in("id", identityIds);
-
-    if (idError) throw idError;
-    const identityMap = new Map((identities ?? []).map((i) => [i.id, i]));
+    const identityRows = await this.orm
+      .select()
+      .from(identities)
+      .where(inArray(identities.id, identityIds));
+    const identityMap = new Map(identityRows.map((i) => [i.id, i]));
     const extrasMap = await this.getConversationExtrasMap(conversations.map((c) => c.id));
 
     return conversations.map((c) => ({
@@ -1188,13 +1174,12 @@ export class DomainService {
     if (convError) throw convError;
     if (!conversation) return null;
 
-    const { data: identity, error: identityError } = await this.db
-      .from("identities")
-      .select("*")
-      .eq("id", conversation.identity_id)
-      .single();
-
-    if (identityError) throw identityError;
+    const [identity] = await this.orm
+      .select()
+      .from(identities)
+      .where(eq(identities.id, conversation.identity_id))
+      .limit(1);
+    if (!identity) throw new Error(`Unknown identity: ${conversation.identity_id}`);
 
     const chainIds = await this.getConversationMergeChainIds(canonicalId);
 
@@ -2094,12 +2079,11 @@ export class DomainService {
     if (!related.length) return [];
 
     const relatedIdentityIds = [...new Set(related.map((c) => c.identity_id))];
-    const { data: identities, error: idError } = await this.db
-      .from("identities")
-      .select("*")
-      .in("id", relatedIdentityIds);
-    if (idError) throw idError;
-    const identityMap = new Map((identities ?? []).map((i) => [i.id, i]));
+    const identityRows = await this.orm
+      .select()
+      .from(identities)
+      .where(inArray(identities.id, relatedIdentityIds));
+    const identityMap = new Map(identityRows.map((i) => [i.id, i]));
     const extrasMap = await this.getConversationExtrasMap(related.map((c) => c.id));
 
     return related.map((c) => ({
@@ -2592,29 +2576,29 @@ export class DomainService {
   }
 
   private async findIdentityByPhone(tenantId: string, phone: string) {
-    const { data, error } = await this.db
-      .from("identities")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .eq("phone", phone)
-      .is("merged_into_id", null)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [identity] = await this.orm
+      .select()
+      .from(identities)
+      .where(and(
+        eq(identities.tenantId, tenantId),
+        eq(identities.phone, phone),
+        isNull(identities.mergedIntoId),
+      ))
+      .limit(1);
+    return identity ?? null;
   }
 
   private async findIdentityByEmail(tenantId: string, email: string) {
-    const { data, error } = await this.db
-      .from("identities")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .eq("email", email)
-      .is("merged_into_id", null)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [identity] = await this.orm
+      .select()
+      .from(identities)
+      .where(and(
+        eq(identities.tenantId, tenantId),
+        eq(identities.email, email),
+        isNull(identities.mergedIntoId),
+      ))
+      .limit(1);
+    return identity ?? null;
   }
 
   private async mergeIdentities(
@@ -2627,38 +2611,36 @@ export class DomainService {
     const canonicalMerge = await this.resolveIdentityId(mergeId);
     if (canonicalKeep === canonicalMerge) return;
 
-    await this.db
-      .from("identities")
-      .update({ merged_into_id: canonicalKeep })
-      .eq("id", canonicalMerge);
+    await this.orm
+      .update(identities)
+      .set({ mergedIntoId: canonicalKeep })
+      .where(eq(identities.id, canonicalMerge));
 
-    await this.db.from("identity_merge_logs").insert({
-      tenant_id: tenantId,
-      identity_a_id: canonicalKeep,
-      identity_b_id: canonicalMerge,
-      matched_on: matchedOn,
-      merged_by: "system",
+    await this.orm.insert(identityMergeLogs).values({
+      tenantId,
+      identityAId: canonicalKeep,
+      identityBId: canonicalMerge,
+      matchedOn,
+      mergedBy: "system",
     });
   }
 
   private async resolveIdentityId(identityId: string): Promise<string> {
-    const { data, error } = await this.db.rpc("resolve_identity_id", {
-      p_identity_id: identityId,
-    });
-    if (error) throw error;
-    return data as string;
+    const result = (await this.orm.execute(
+      sql`SELECT resolve_identity_id(${identityId}::uuid) AS id`,
+    )) as { rows: Array<{ id: string }> };
+    return result.rows[0].id;
   }
 
   private async getCanonicalIdentity(identityId: string): Promise<Identity> {
     const canonicalId = await this.resolveIdentityId(identityId);
-    const { data, error } = await this.db
-      .from("identities")
-      .select("*")
-      .eq("id", canonicalId)
-      .single();
-
-    if (error) throw error;
-    return data;
+    const [identity] = await this.orm
+      .select()
+      .from(identities)
+      .where(eq(identities.id, canonicalId))
+      .limit(1);
+    if (!identity) throw new Error(`Unknown identity: ${canonicalId}`);
+    return identity;
   }
 }
 
