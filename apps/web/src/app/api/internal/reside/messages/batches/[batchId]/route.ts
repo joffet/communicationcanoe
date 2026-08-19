@@ -43,10 +43,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ batc
 
   return Response.json({
     status: detail.batch.status,
-    totalRecipients: detail.batch.total_recipients,
-    completedRecipients: detail.batch.completed_recipients,
+    totalRecipients: detail.batch.totalRecipients,
+    completedRecipients: detail.batch.completedRecipients,
     recipients: detail.recipients.map((r) => ({
-      identity: r.identity_contact,
+      identity: r.identityContact,
       status: r.status,
       deliveryStatus: r.deliveryStatus,
       deliveryError: r.deliveryError,

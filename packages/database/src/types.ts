@@ -1,3 +1,4 @@
+import { outboundBatches, outboundBatchRecipients } from "./schema";
 export type Json =
   | string
   | number
@@ -639,8 +640,21 @@ export type Message = MessageRow;
 export type Team = TeamRow;
 export type LiveTransfer = LiveTransferRow;
 export type IdentityConversionLog = IdentityConversionLogRow;
-export type OutboundBatch = OutboundBatchRow;
-export type OutboundBatchRecipient = OutboundBatchRecipientRow;
+/**
+ * Now inferred from the Drizzle schema rather than aliased to the generated
+ * Supabase row type, which means camelCase fields instead of snake_case.
+ *
+ * The migration converts one method at a time, and each converted method's
+ * return shape changes with it. Retyping here rather than mapping back to the
+ * old shape is deliberate: TypeScript then names every consumer that needs
+ * updating, exhaustively and at compile time. A mapping layer would keep the
+ * build green and leave the same work to be found by hand later.
+ *
+ * OutboundBatchRow and OutboundBatchRecipientRow still exist in this file for
+ * the tables that have not moved yet.
+ */
+export type OutboundBatch = typeof outboundBatches.$inferSelect;
+export type OutboundBatchRecipient = typeof outboundBatchRecipients.$inferSelect;
 export type Tag = TagRow;
 export type ConversationAssignee = ConversationAssigneeRow;
 export type ConversationReadState = ConversationReadStateRow;

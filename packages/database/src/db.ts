@@ -1,8 +1,17 @@
 import { drizzle } from "drizzle-orm/node-postgres";
+import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { Pool } from "pg";
 import * as schema from "./schema";
 
-export type Db = ReturnType<typeof createDb>;
+/**
+ * The base class every Drizzle Postgres driver extends, rather than
+ * node-postgres' concrete type. Tests run against pglite, whose result type
+ * differs enough that the two are not assignable to each other - typing this
+ * to the driver used in production would make the test harness untypeable
+ * without a cast, and a cast there would hide a real mismatch just as
+ * effectively as it hides this cosmetic one.
+ */
+export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 let pool: Pool | undefined;
 
