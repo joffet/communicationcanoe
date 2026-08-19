@@ -25,6 +25,8 @@
     "pg": "^8.22.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.5",
+    "@electric-sql/pglite-pgvector": "^0.0.6",
     "@types/node": "^20.19.43",
     "@types/pg": "^8.20.0",
     "dotenv": "^17.4.2",
