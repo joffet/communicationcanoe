@@ -9,8 +9,8 @@ export async function GET(
   const ctx = await assertConversationAccess(id);
   if (!ctx) return new Response("Unauthorized", { status: 401 });
 
-  const settings = await ctx.domain.getTenantSettings(ctx.thread.tenant_id);
-  const examples = await ctx.domain.getResolvedConversationExamples(ctx.thread.tenant_id);
+  const settings = await ctx.domain.getTenantSettings(ctx.thread.tenantId);
+  const examples = await ctx.domain.getResolvedConversationExamples(ctx.thread.tenantId);
 
   const faqRaw = settings?.faq_snippets;
   const faqSnippets = Array.isArray(faqRaw)

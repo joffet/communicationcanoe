@@ -34,8 +34,8 @@ export async function POST(request: Request) {
       id: c.id,
       status: c.status,
       summary: c.summary,
-      created_at: c.created_at,
-      last_message_at: c.last_message_at,
+      created_at: c.createdAt,
+      last_message_at: c.lastMessageAt,
     })),
   });
 }

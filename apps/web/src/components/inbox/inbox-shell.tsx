@@ -56,7 +56,7 @@ export function InboxShell({
   }, [initialConversations, initialThread]);
 
   const isWebChat = thread?.messages.some((m) => m.channel === "web_chat");
-  const isAssignedToMe = thread?.assigned_user_id === currentUserId;
+  const isAssignedToMe = thread?.assignedUserId === currentUserId;
   const needsHumanNow = selectedId ? needsHuman.has(selectedId) : false;
 
   async function loadSuggestion() {
@@ -148,7 +148,7 @@ export function InboxShell({
                           <span className="h-2 w-2 rounded-full bg-red-500" title="Needs human" />
                         )}
                         <span className="text-xs text-zinc-400">
-                          {formatRelativeTime(c.last_message_at)}
+                          {formatRelativeTime(c.lastMessageAt.toISOString())}
                         </span>
                       </div>
                     </div>

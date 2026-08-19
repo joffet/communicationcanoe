@@ -70,7 +70,7 @@ describe("getViewerConversationStates", () => {
     });
 
     const states = await domain.getViewerConversationStates(
-      [{ id: c.id, last_message_at: c.lastMessageAt.toISOString() }], VIEWER,
+      [{ id: c.id, lastMessageAt: c.lastMessageAt }], VIEWER,
     );
 
     expect(states.get(c.id)).toMatchObject({
@@ -90,7 +90,7 @@ describe("getViewerConversationStates", () => {
     });
 
     const states = await domain.getViewerConversationStates(
-      [{ id: c.id, last_message_at: lastMessageAt.toISOString() }], VIEWER,
+      [{ id: c.id, lastMessageAt: lastMessageAt }], VIEWER,
     );
 
     expect(states.get(c.id)?.viewer_has_unread).toBe(false);
@@ -109,7 +109,7 @@ describe("getViewerConversationStates", () => {
     });
 
     const states = await domain.getViewerConversationStates(
-      [{ id: c.id, last_message_at: "2026-08-03T00:00:00.000Z" }], VIEWER,
+      [{ id: c.id, lastMessageAt: new Date("2026-08-03T00:00:00.000Z") }], VIEWER,
     );
 
     expect(states.get(c.id)?.viewer_has_unread).toBe(true);
@@ -125,7 +125,7 @@ describe("getViewerConversationStates", () => {
     });
 
     const states = await domain.getViewerConversationStates(
-      [{ id: c.id, last_message_at: "2026-08-02T00:00:00.000Z" }], VIEWER,
+      [{ id: c.id, lastMessageAt: new Date("2026-08-02T00:00:00.000Z") }], VIEWER,
     );
 
     expect(states.get(c.id)?.viewer_is_relevant).toBe(true);
@@ -143,7 +143,7 @@ describe("getViewerConversationStates", () => {
     });
 
     const states = await domain.getViewerConversationStates(
-      [{ id: c.id, last_message_at: "2026-08-02T00:00:00.000Z" }], VIEWER,
+      [{ id: c.id, lastMessageAt: new Date("2026-08-02T00:00:00.000Z") }], VIEWER,
     );
 
     expect(states.get(c.id)).toMatchObject({

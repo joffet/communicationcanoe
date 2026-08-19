@@ -80,7 +80,7 @@ export async function assertConversationAccess(conversationId: string) {
   }
 
   const memberships = await domain.getUserTenants(session.user.id);
-  if (!memberships.some((m) => m.tenant.id === thread.tenant_id)) return null;
+  if (!memberships.some((m) => m.tenant.id === thread.tenantId)) return null;
 
   return { session, thread, domain, isSuperAdmin: false as const };
 }

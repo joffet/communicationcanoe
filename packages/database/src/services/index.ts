@@ -6,7 +6,7 @@ import type {
   IdentityContact,
   LogLiveTransferInput,
 } from "@communication-canoe/shared";
-import { and, asc, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm";
 import { createDb, type Db } from "../db";
 import {
   identities,
@@ -247,15 +247,12 @@ export class DomainService {
   }
 
   async assignConversationUser(conversationId: string, userId: string | null) {
-    const { data, error } = await this.db
-      .from("conversations")
-      .update({ assigned_user_id: userId })
-      .eq("id", conversationId)
-      .select("*")
-      .single();
-
-    if (error) throw error;
-    return data;
+    const [updated] = await this.orm
+      .update(conversationsTable)
+      .set({ assignedUserId: userId })
+      .where(eq(conversationsTable.id, conversationId))
+      .returning();
+    return updated;
   }
 
   createChatSessionToken(
@@ -274,7 +271,7 @@ export class DomainService {
     if (!payload || payload.tenantId !== tenantId) return null;
 
     const thread = await this.getConversationThread(payload.conversationId);
-    if (!thread || thread.tenant_id !== tenantId) return null;
+    if (!thread || thread.tenantId !== tenantId) return null;
     if (thread.status !== "open") return null;
 
     // Phase 8: a pinned conversation isn't itself broken by having been
@@ -441,25 +438,24 @@ export class DomainService {
     const canonicalId = await this.resolveIdentityId(identityId);
     const identityChainIds = await this.getIdentityMergeChainIds(canonicalId);
 
-    const { data: openCandidates, error: openError } = await this.db
-      .from("conversations")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .in("identity_id", identityChainIds)
-      .eq("status", "open")
-      .order("last_message_at", { ascending: false });
-    if (openError) throw openError;
+    const openCandidates = await this.orm
+      .select()
+      .from(conversationsTable)
+      .where(and(
+        eq(conversationsTable.tenantId, tenantId),
+        inArray(conversationsTable.identityId, identityChainIds),
+        eq(conversationsTable.status, "open"),
+      ))
+      .orderBy(desc(conversationsTable.lastMessageAt));
 
     const candidates = openCandidates ?? [];
 
     if (candidates.length === 0) {
-      const { data, error } = await this.db
-        .from("conversations")
-        .insert({ tenant_id: tenantId, identity_id: canonicalId, status: "open" })
-        .select("*")
-        .single();
-      if (error) throw error;
-      return { conversation: data, isStale: false };
+      const [created] = await this.orm
+        .insert(conversationsTable)
+        .values({ tenantId, identityId: canonicalId, status: "open" })
+        .returning();
+      return { conversation: created, isStale: false };
     }
 
     // Default: most-recently-active candidate (query already ordered desc).
@@ -477,7 +473,7 @@ export class DomainService {
     const settings = await this.getTenantSettings(tenantId);
     const stalenessMinutes = settings?.conversation_staleness_minutes ?? 1440;
     const staleBefore = Date.now() - stalenessMinutes * 60_000;
-    const isStale = new Date(selected.last_message_at).getTime() < staleBefore;
+    const isStale = new Date(selected.lastMessageAt).getTime() < staleBefore;
 
     return { conversation: selected, isStale };
   }
@@ -491,18 +487,23 @@ export class DomainService {
     newSubject: string,
   ): Promise<Conversation | null> {
     const candidateIds = candidates.map((c) => c.id);
-    const { data: recentMessages, error } = await this.db
-      .from("messages")
-      .select("conversation_id, subject, created_at")
-      .in("conversation_id", candidateIds)
-      .not("subject", "is", null)
-      .order("created_at", { ascending: false });
-    if (error) throw error;
+    const recentMessages = await this.orm
+      .select({
+        conversationId: messages.conversationId,
+        subject: messages.subject,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .where(and(
+        inArray(messages.conversationId, candidateIds),
+        isNotNull(messages.subject),
+      ))
+      .orderBy(desc(messages.createdAt));
 
     const latestSubjectByConversation = new Map<string, string>();
     for (const m of recentMessages ?? []) {
-      if (!latestSubjectByConversation.has(m.conversation_id) && m.subject) {
-        latestSubjectByConversation.set(m.conversation_id, m.subject);
+      if (!latestSubjectByConversation.has(m.conversationId) && m.subject) {
+        latestSubjectByConversation.set(m.conversationId, m.subject);
       }
     }
 
@@ -517,7 +518,7 @@ export class DomainService {
   }
 
   async appendMessage(input: AppendMessageInput): Promise<Message> {
-    // Two AFTER INSERT triggers hang off this table - conversations.last_message_at
+    // Two AFTER INSERT triggers hang off this table - conversations.lastMessageAt
     // and the SLA response clock - and they fire on the row regardless of which
     // client wrote it, so nothing here has to maintain either.
     const [message] = await this.orm
@@ -626,19 +627,20 @@ export class DomainService {
    * still-pending-review message is never due, mirroring how this query
    * already redundantly checks delivery_status alongside claimScheduledMessage. */
   async listDueScheduledMessageIds(limit: number): Promise<string[]> {
-    const { data, error } = await this.db
-      .from("messages")
-      .select("id")
-      .eq("visibility", "external")
-      .eq("delivery_status", "queued")
-      .eq("ai_review_status", "approved")
-      .not("scheduled_send_at", "is", null)
-      .lte("scheduled_send_at", new Date().toISOString())
-      .order("scheduled_send_at", { ascending: true })
+    const data = await this.orm
+      .select({ id: messages.id })
+      .from(messages)
+      .where(and(
+        eq(messages.visibility, "external"),
+        eq(messages.deliveryStatus, "queued"),
+        eq(messages.aiReviewStatus, "approved"),
+        isNotNull(messages.scheduledSendAt),
+        lte(messages.scheduledSendAt, new Date()),
+      ))
+      .orderBy(asc(messages.scheduledSendAt))
       .limit(limit);
 
-    if (error) throw error;
-    return (data ?? []).map((row) => row.id as string);
+    return data.map((row) => row.id);
   }
 
   /** Atomically claims one scheduled message for dispatch: the conditional
@@ -1001,29 +1003,30 @@ export class DomainService {
     tenantId: string,
     filters: ConversationFilters = { limit: 50 },
   ): Promise<ConversationWithIdentity[]> {
-    let query = this.db
-      .from("conversations")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .order("last_message_at", { ascending: false })
-      .limit(filters.limit);
-
     // A merged-away conversation is a dead pointer, not a real inbox item -
     // exclude it from the unfiltered default so it never clutters the list/
     // kanban views. An explicit status filter (nothing needs 'merged' today)
     // still overrides this.
-    if (filters.status) {
-      query = query.eq("status", filters.status);
-    } else {
-      query = query.neq("status", "merged");
+    const conditions = [
+      eq(conversationsTable.tenantId, tenantId),
+      filters.status
+        ? eq(conversationsTable.status, filters.status)
+        : ne(conversationsTable.status, "merged"),
+    ];
+    if (filters.assignedTeamId) {
+      conditions.push(eq(conversationsTable.assignedTeamId, filters.assignedTeamId));
     }
-    if (filters.assignedTeamId) query = query.eq("assigned_team_id", filters.assignedTeamId);
 
-    const { data: conversations, error } = await query;
-    if (error) throw error;
-    if (!conversations?.length) return [];
+    const conversations = await this.orm
+      .select()
+      .from(conversationsTable)
+      .where(and(...conditions))
+      .orderBy(desc(conversationsTable.lastMessageAt))
+      .limit(filters.limit);
 
-    const identityIds = [...new Set(conversations.map((c) => c.identity_id))];
+    if (!conversations.length) return [];
+
+    const identityIds = [...new Set(conversations.map((c) => c.identityId))];
     const identityRows = await this.orm
       .select()
       .from(identities)
@@ -1033,7 +1036,7 @@ export class DomainService {
 
     return conversations.map((c) => ({
       ...c,
-      identity: identityMap.get(c.identity_id)!,
+      identity: identityMap.get(c.identityId)!,
       ...(extrasMap.get(c.id) ?? { participants: [], tags: [], assignees: [] }),
     }));
   }
@@ -1094,17 +1097,18 @@ export class DomainService {
     const ids = await this.getIdentityMergeChainIds(identityId);
     if (ids.length === 0) return [];
 
-    const { data: conversations, error } = await this.db
-      .from("conversations")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .in("identity_id", ids)
-      .order("last_message_at", { ascending: false });
+    const conversations = await this.orm
+      .select()
+      .from(conversationsTable)
+      .where(and(
+        eq(conversationsTable.tenantId, tenantId),
+        inArray(conversationsTable.identityId, ids),
+      ))
+      .orderBy(desc(conversationsTable.lastMessageAt));
 
-    if (error) throw error;
-    if (!conversations?.length) return [];
+    if (!conversations.length) return [];
 
-    const identityIds = [...new Set(conversations.map((c) => c.identity_id))];
+    const identityIds = [...new Set(conversations.map((c) => c.identityId))];
     const identityRows = await this.orm
       .select()
       .from(identities)
@@ -1114,7 +1118,7 @@ export class DomainService {
 
     return conversations.map((c) => ({
       ...c,
-      identity: identityMap.get(c.identity_id)!,
+      identity: identityMap.get(c.identityId)!,
       ...(extrasMap.get(c.id) ?? { participants: [], tags: [], assignees: [] }),
     }));
   }
@@ -1124,27 +1128,23 @@ export class DomainService {
    * view, and transitively the Phase 4 member thread view - transparently
    * lands on the live thread), then reads messages across the *entire*
    * merge chain rather than just this one row, since a merge never rewrites
-   * messages.conversation_id. Callers that need to detect the redirect
+   * messages.conversationId. Callers that need to detect the redirect
    * case (e.g. to issue an HTTP redirect to the canonical URL) compare the
    * returned conversation's `id` against the id they requested. */
   async getConversationThread(conversationId: string): Promise<ConversationThread | null> {
     const canonicalId = await this.resolveConversationId(conversationId);
 
-    const { data: conversation, error: convError } = await this.db
-      .from("conversations")
-      .select("*")
-      .eq("id", canonicalId)
-      .maybeSingle();
-
-    if (convError) throw convError;
+    const [conversation] = await this.orm
+      .select().from(conversationsTable)
+      .where(eq(conversationsTable.id, canonicalId)).limit(1);
     if (!conversation) return null;
 
     const [identity] = await this.orm
       .select()
       .from(identities)
-      .where(eq(identities.id, conversation.identity_id))
+      .where(eq(identities.id, conversation.identityId))
       .limit(1);
-    if (!identity) throw new Error(`Unknown identity: ${conversation.identity_id}`);
+    if (!identity) throw new Error(`Unknown identity: ${conversation.identityId}`);
 
     const chainIds = await this.getConversationMergeChainIds(canonicalId);
 
@@ -1223,27 +1223,21 @@ export class DomainService {
   }
 
   async assignConversationTeam(conversationId: string, teamId: string | null) {
-    const { data, error } = await this.db
-      .from("conversations")
-      .update({ assigned_team_id: teamId })
-      .eq("id", conversationId)
-      .select("*")
-      .single();
-
-    if (error) throw error;
-    return data;
+    const [updated] = await this.orm
+      .update(conversationsTable)
+      .set({ assignedTeamId: teamId })
+      .where(eq(conversationsTable.id, conversationId))
+      .returning();
+    return updated;
   }
 
   async updateConversationSummary(conversationId: string, summary: string) {
-    const { data, error } = await this.db
-      .from("conversations")
-      .update({ summary })
-      .eq("id", conversationId)
-      .select("*")
-      .single();
-
-    if (error) throw error;
-    return data;
+    const [updated] = await this.orm
+      .update(conversationsTable)
+      .set({ summary })
+      .where(eq(conversationsTable.id, conversationId))
+      .returning();
+    return updated;
   }
 
   // ---- Tags (Phase 2 / 2A) ----
@@ -1405,7 +1399,7 @@ export class DomainService {
    * they already fetched (need only id/last_message_at) rather than this
    * re-querying them. */
   async getViewerConversationStates(
-    conversations: Array<Pick<Conversation, "id" | "last_message_at">>,
+    conversations: Array<Pick<Conversation, "id" | "lastMessageAt">>,
     viewerUserId: string,
   ): Promise<Map<string, ConversationViewerState>> {
     const map = new Map<string, ConversationViewerState>();
@@ -1457,12 +1451,9 @@ export class DomainService {
 
     for (const c of conversations) {
       const isRelevant = relevantIds.has(c.id);
-      // Drizzle returns timestamptz as Date; the conversation rows still come
-      // from unconverted reads, so their last_message_at is an ISO string.
-      // The comparison has to bridge the two until those methods move.
       const lastReadAt = lastReadAtByConversation.get(c.id) ?? null;
       const hasUnread =
-        isRelevant && (!lastReadAt || lastReadAt < new Date(c.last_message_at));
+        isRelevant && (!lastReadAt || lastReadAt < c.lastMessageAt);
       map.set(c.id, {
         viewer_is_relevant: isRelevant,
         viewer_has_unread: hasUnread,
@@ -1503,7 +1494,7 @@ export class DomainService {
     // into this slice.
     const conversations = rows.map((r) => ({
       id: r.id,
-      last_message_at: r.lastMessageAt.toISOString(),
+      lastMessageAt: r.lastMessageAt,
     }));
     const states = await this.getViewerConversationStates(conversations, viewerUserId);
 
@@ -1519,7 +1510,7 @@ export class DomainService {
   }
 
   // ---- Multi-participant conversations (Phase 2 / 2D) — purely additive, see
-  // conversation_participants migration's comment: conversations.identity_id
+  // conversation_participants migration's comment: conversations.identityId
   // stays the unchanged "primary" identity for all existing threading logic. ----
 
   async addConversationParticipant(
@@ -1557,7 +1548,7 @@ export class DomainService {
   }
 
   // ---- Conversation merging (Phase 7) — admin-triggered, closes the real
-  // gap where mergeIdentities never re-points conversations.identity_id,
+  // gap where mergeIdentities never re-points conversations.identityId,
   // leaving two simultaneously-open conversations for one canonical
   // resident. Mirrors the identity-merge pattern: messages are never
   // rewritten (see getConversationThread's chain-aware read above), only
@@ -1739,40 +1730,37 @@ export class DomainService {
       throw new Error("These conversations are already merged.");
     }
 
-    const { data: conversations, error } = await this.db
-      .from("conversations")
-      .select("*")
-      .in("id", [canonicalSourceId, canonicalTargetId]);
-    if (error) throw error;
+    const conversations = await this.orm
+      .select().from(conversationsTable)
+      .where(inArray(conversationsTable.id, [canonicalSourceId, canonicalTargetId]));
 
-    const source = conversations?.find((c) => c.id === canonicalSourceId);
-    const target = conversations?.find((c) => c.id === canonicalTargetId);
+    const source = conversations.find((c) => c.id === canonicalSourceId);
+    const target = conversations.find((c) => c.id === canonicalTargetId);
     if (!source || !target) throw new Error("Conversation not found.");
-    if (source.tenant_id !== tenantId || target.tenant_id !== tenantId) {
+    if (source.tenantId !== tenantId || target.tenantId !== tenantId) {
       throw new Error("Conversations do not belong to this tenant.");
     }
 
-    const targetIdentityChain = await this.getIdentityMergeChainIds(target.identity_id);
-    if (!targetIdentityChain.includes(source.identity_id)) {
+    const targetIdentityChain = await this.getIdentityMergeChainIds(target.identityId);
+    if (!targetIdentityChain.includes(source.identityId)) {
       throw new Error("These conversations belong to different residents - merge identities first.");
     }
 
     await this.moveConversationExtras(canonicalSourceId, canonicalTargetId);
 
     const lastMessageAt =
-      new Date(source.last_message_at) > new Date(target.last_message_at)
-        ? source.last_message_at
-        : target.last_message_at;
+      new Date(source.lastMessageAt) > new Date(target.lastMessageAt)
+        ? source.lastMessageAt
+        : target.lastMessageAt;
 
-    const [targetUpdate, sourceUpdate] = await Promise.all([
-      this.db.from("conversations").update({ last_message_at: lastMessageAt }).eq("id", canonicalTargetId),
-      this.db
-        .from("conversations")
-        .update({ status: "merged", merged_into_id: canonicalTargetId })
-        .eq("id", canonicalSourceId),
+    await Promise.all([
+      this.orm.update(conversationsTable)
+        .set({ lastMessageAt })
+        .where(eq(conversationsTable.id, canonicalTargetId)),
+      this.orm.update(conversationsTable)
+        .set({ status: "merged", mergedIntoId: canonicalTargetId })
+        .where(eq(conversationsTable.id, canonicalSourceId)),
     ]);
-    if (targetUpdate.error) throw targetUpdate.error;
-    if (sourceUpdate.error) throw sourceUpdate.error;
 
     // Adjacent fix (Phase 8): merge combines message histories, so the
     // target's response_due_at/response_overdue_notified_at (only ever
@@ -1811,57 +1799,54 @@ export class DomainService {
   ): Promise<string> {
     const canonicalSourceId = await this.resolveConversationId(sourceConversationId);
 
-    const { data: source, error: sourceError } = await this.db
-      .from("conversations")
-      .select("*")
-      .eq("id", canonicalSourceId)
-      .maybeSingle();
-    if (sourceError) throw sourceError;
-    if (!source || source.tenant_id !== tenantId) {
+    const [source] = await this.orm
+      .select().from(conversationsTable)
+      .where(eq(conversationsTable.id, canonicalSourceId)).limit(1);
+    if (!source || source.tenantId !== tenantId) {
       throw new Error("Conversation not found.");
     }
 
     // Chain-aware, not a literal equality check: a message that arrived via
     // an earlier merge still carries its pre-merge conversation_id (merge
-    // never rewrites messages.conversation_id, unlike split) - getConversationThread
+    // never rewrites messages.conversationId, unlike split) - getConversationThread
     // already reads across the whole chain, so ownership here has to match.
     const chainIds = await this.getConversationMergeChainIds(canonicalSourceId);
 
-    const { data: splitMessage, error: messageError } = await this.db
-      .from("messages")
-      .select("id, conversation_id, created_at")
-      .eq("id", splitMessageId)
-      .maybeSingle();
-    if (messageError) throw messageError;
-    if (!splitMessage || !chainIds.includes(splitMessage.conversation_id)) {
+    const [splitMessage] = await this.orm
+      .select({
+        id: messages.id,
+        conversationId: messages.conversationId,
+        createdAt: messages.createdAt,
+      })
+      .from(messages).where(eq(messages.id, splitMessageId)).limit(1);
+    if (!splitMessage || !chainIds.includes(splitMessage.conversationId)) {
       throw new Error("That message does not belong to this conversation.");
     }
 
-    const { data: target, error: createError } = await this.db
-      .from("conversations")
-      .insert({ tenant_id: tenantId, identity_id: source.identity_id, status: "open" })
-      .select("*")
-      .single();
-    if (createError) throw createError;
+    const [target] = await this.orm
+      .insert(conversationsTable)
+      .values({ tenantId, identityId: source.identityId, status: "open" })
+      .returning();
 
     const recheckId = await this.resolveConversationId(sourceConversationId);
     if (recheckId !== canonicalSourceId) {
-      await this.db.from("conversations").delete().eq("id", target.id);
+      await this.orm.delete(conversationsTable).where(eq(conversationsTable.id, target.id));
       throw new Error("This conversation was merged into another one - refresh and try again.");
     }
 
-    const { data: movedMessages, error: moveError } = await this.db
-      .from("messages")
-      .update({ conversation_id: target.id })
-      .in("conversation_id", chainIds)
-      .gte("created_at", splitMessage.created_at)
-      .select("id, created_at");
-    if (moveError) throw moveError;
+    const movedMessages = await this.orm
+      .update(messages)
+      .set({ conversationId: target.id })
+      .where(and(
+        inArray(messages.conversationId, chainIds),
+        gte(messages.createdAt, splitMessage.createdAt),
+      ))
+      .returning({ id: messages.id, createdAt: messages.createdAt });
 
-    const movedIds = (movedMessages ?? []).map((m) => m.id);
-    const targetLastMessageAt = (movedMessages ?? []).reduce(
-      (latest, m) => (m.created_at > latest ? m.created_at : latest),
-      splitMessage.created_at as string,
+    const movedIds = movedMessages.map((m) => m.id);
+    const targetLastMessageAt = movedMessages.reduce(
+      (latest, m) => (m.createdAt > latest ? m.createdAt : latest),
+      splitMessage.createdAt,
     );
 
     if (movedIds.length) {
@@ -1877,24 +1862,20 @@ export class DomainService {
       if (liveTransferError) throw liveTransferError;
     }
 
-    const { data: latestRemaining, error: remainingError } = await this.db
-      .from("messages")
-      .select("created_at")
-      .in("conversation_id", chainIds)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (remainingError) throw remainingError;
+    const [latestRemaining] = await this.orm
+      .select({ createdAt: messages.createdAt })
+      .from(messages)
+      .where(inArray(messages.conversationId, chainIds))
+      .orderBy(desc(messages.createdAt)).limit(1);
 
-    const [sourceTimestampUpdate, targetTimestampUpdate] = await Promise.all([
-      this.db
-        .from("conversations")
-        .update({ last_message_at: latestRemaining?.created_at ?? source.created_at })
-        .eq("id", canonicalSourceId),
-      this.db.from("conversations").update({ last_message_at: targetLastMessageAt }).eq("id", target.id),
+    await Promise.all([
+      this.orm.update(conversationsTable)
+        .set({ lastMessageAt: latestRemaining?.createdAt ?? source.createdAt })
+        .where(eq(conversationsTable.id, canonicalSourceId)),
+      this.orm.update(conversationsTable)
+        .set({ lastMessageAt: targetLastMessageAt })
+        .where(eq(conversationsTable.id, target.id)),
     ]);
-    if (sourceTimestampUpdate.error) throw sourceTimestampUpdate.error;
-    if (targetTimestampUpdate.error) throw targetTimestampUpdate.error;
 
     await Promise.all([
       this.recomputeConversationSla(tenantId, canonicalSourceId),
@@ -2009,33 +1990,31 @@ export class DomainService {
   async listRelatedConversations(tenantId: string, conversationId: string): Promise<ConversationWithIdentity[]> {
     const canonicalId = await this.resolveConversationId(conversationId);
 
-    const { data: conversation, error: convError } = await this.db
-      .from("conversations")
-      .select("identity_id")
-      .eq("id", canonicalId)
-      .maybeSingle();
-    if (convError) throw convError;
+    const [conversation] = await this.orm
+      .select({ identityId: conversationsTable.identityId })
+      .from(conversationsTable)
+      .where(eq(conversationsTable.id, canonicalId)).limit(1);
     if (!conversation) return [];
 
     const [identityIds, ownChainIds] = await Promise.all([
-      this.getIdentityMergeChainIds(conversation.identity_id),
+      this.getIdentityMergeChainIds(conversation.identityId),
       this.getConversationMergeChainIds(canonicalId),
     ]);
 
-    const { data: candidates, error } = await this.db
-      .from("conversations")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .in("identity_id", identityIds)
-      .neq("status", "merged")
-      .order("last_message_at", { ascending: false });
-    if (error) throw error;
+    const candidates = await this.orm
+      .select().from(conversationsTable)
+      .where(and(
+        eq(conversationsTable.tenantId, tenantId),
+        inArray(conversationsTable.identityId, identityIds),
+        ne(conversationsTable.status, "merged"),
+      ))
+      .orderBy(desc(conversationsTable.lastMessageAt));
 
     const ownChainSet = new Set(ownChainIds);
     const related = (candidates ?? []).filter((c) => !ownChainSet.has(c.id));
     if (!related.length) return [];
 
-    const relatedIdentityIds = [...new Set(related.map((c) => c.identity_id))];
+    const relatedIdentityIds = [...new Set(related.map((c) => c.identityId))];
     const identityRows = await this.orm
       .select()
       .from(identities)
@@ -2045,7 +2024,7 @@ export class DomainService {
 
     return related.map((c) => ({
       ...c,
-      identity: identityMap.get(c.identity_id)!,
+      identity: identityMap.get(c.identityId)!,
       ...(extrasMap.get(c.id) ?? { participants: [], tags: [], assignees: [] }),
     }));
   }
@@ -2054,44 +2033,39 @@ export class DomainService {
   // scan-for-overdue-conversations job is Phase 5's job. ----
 
   async updateConversationPriority(conversationId: string, priority: ConversationPriority) {
-    const { data, error } = await this.db
-      .from("conversations")
-      .update({ priority })
-      .eq("id", conversationId)
-      .select("*")
-      .single();
-
-    if (error) throw error;
-    return data;
+    const [updated] = await this.orm
+      .update(conversationsTable)
+      .set({ priority })
+      .where(eq(conversationsTable.id, conversationId))
+      .returning();
+    return updated;
   }
 
   async setConversationResponseDueAt(conversationId: string, dueAt: string | null) {
-    const { data, error } = await this.db
-      .from("conversations")
-      .update({ response_due_at: dueAt })
-      .eq("id", conversationId)
-      .select("*")
-      .single();
-
-    if (error) throw error;
-    return data;
+    const [updated] = await this.orm
+      .update(conversationsTable)
+      .set({ responseDueAt: dueAt ? new Date(dueAt) : null })
+      .where(eq(conversationsTable.id, conversationId))
+      .returning();
+    return updated;
   }
 
   /** Best-effort snapshot of overdue conversations - not itself a claim, see
    * claimOverdueConversationNotification for the atomic per-row step. Same
    * shape as listDueScheduledMessageIds (Phase 3). */
   async listOverdueConversationIds(limit: number): Promise<string[]> {
-    const { data, error } = await this.db
-      .from("conversations")
-      .select("id")
-      .not("response_due_at", "is", null)
-      .lte("response_due_at", new Date().toISOString())
-      .is("response_overdue_notified_at", null)
-      .order("response_due_at", { ascending: true })
+    const data = await this.orm
+      .select({ id: conversationsTable.id })
+      .from(conversationsTable)
+      .where(and(
+        isNotNull(conversationsTable.responseDueAt),
+        lte(conversationsTable.responseDueAt, new Date()),
+        isNull(conversationsTable.responseOverdueNotifiedAt),
+      ))
+      .orderBy(asc(conversationsTable.responseDueAt))
       .limit(limit);
 
-    if (error) throw error;
-    return (data ?? []).map((row) => row.id as string);
+    return data.map((row) => row.id);
   }
 
   /** Atomically claims one overdue conversation for notification: the
@@ -2104,15 +2078,17 @@ export class DomainService {
    * that branch sets it to NULL, not away-from-NULL, so this can only ever
    * return null on a genuine double-claim, not a false negative). */
   async claimOverdueConversationNotification(conversationId: string): Promise<Conversation | null> {
-    const { data, error } = await this.db
-      .from("conversations")
-      .update({ response_overdue_notified_at: new Date().toISOString() })
-      .eq("id", conversationId)
-      .is("response_overdue_notified_at", null)
-      .select("*")
-      .maybeSingle();
-
-    if (error) throw error;
+    // The null predicate is the claim: two notification workers racing, only
+    // one matches an unnotified row, so an overdue conversation is announced
+    // once rather than once per replica.
+    const [data] = await this.orm
+      .update(conversationsTable)
+      .set({ responseOverdueNotifiedAt: new Date() })
+      .where(and(
+        eq(conversationsTable.id, conversationId),
+        isNull(conversationsTable.responseOverdueNotifiedAt),
+      ))
+      .returning();
     return data;
   }
 
@@ -2130,26 +2106,23 @@ export class DomainService {
   async recomputeConversationSla(tenantId: string, conversationId: string): Promise<void> {
     // Chain-aware: a conversation with merge history has messages whose raw
     // conversation_id still points at an earlier, merged-away conversation
-    // (merge never rewrites messages.conversation_id) - the true message
+    // (merge never rewrites messages.conversationId) - the true message
     // set has to be read the same way getConversationThread reads it.
     const chainIds = await this.getConversationMergeChainIds(conversationId);
 
-    const { data: latestExternal, error: latestError } = await this.db
-      .from("messages")
-      .select("direction, created_at")
-      .in("conversation_id", chainIds)
-      .eq("visibility", "external")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (latestError) throw latestError;
+    const [latestExternal] = await this.orm
+      .select({ direction: messages.direction, createdAt: messages.createdAt })
+      .from(messages)
+      .where(and(
+        inArray(messages.conversationId, chainIds),
+        eq(messages.visibility, "external"),
+      ))
+      .orderBy(desc(messages.createdAt)).limit(1);
 
     if (!latestExternal || latestExternal.direction === "outbound") {
-      const { error } = await this.db
-        .from("conversations")
-        .update({ response_due_at: null, response_overdue_notified_at: null })
-        .eq("id", conversationId);
-      if (error) throw error;
+      await this.orm.update(conversationsTable)
+        .set({ responseDueAt: null, responseOverdueNotifiedAt: null })
+        .where(eq(conversationsTable.id, conversationId));
       return;
     }
 
@@ -2157,40 +2130,43 @@ export class DomainService {
     // streak: the earliest inbound-external message after the most recent
     // outbound-external one, or the earliest inbound-external message
     // overall if there's never been an outbound one.
-    const { data: lastOutbound, error: outboundError } = await this.db
-      .from("messages")
-      .select("created_at")
-      .in("conversation_id", chainIds)
-      .eq("visibility", "external")
-      .eq("direction", "outbound")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (outboundError) throw outboundError;
+    const [lastOutbound] = await this.orm
+      .select({ createdAt: messages.createdAt })
+      .from(messages)
+      .where(and(
+        inArray(messages.conversationId, chainIds),
+        eq(messages.visibility, "external"),
+        eq(messages.direction, "outbound"),
+      ))
+      .orderBy(desc(messages.createdAt)).limit(1);
 
-    let streakStartQuery = this.db
-      .from("messages")
-      .select("created_at")
-      .in("conversation_id", chainIds)
-      .eq("visibility", "external")
-      .eq("direction", "inbound")
-      .order("created_at", { ascending: true })
+    // The unanswered streak starts at the first inbound external message after
+    // the last outbound one - or at the earliest inbound message if there has
+    // never been a reply.
+    const streakConditions = [
+      inArray(messages.conversationId, chainIds),
+      eq(messages.visibility, "external"),
+      eq(messages.direction, "inbound"),
+    ];
+    if (lastOutbound) {
+      streakConditions.push(gt(messages.createdAt, lastOutbound.createdAt));
+    }
+
+    const [streakStart] = await this.orm
+      .select({ createdAt: messages.createdAt })
+      .from(messages)
+      .where(and(...streakConditions))
+      .orderBy(asc(messages.createdAt))
       .limit(1);
-    if (lastOutbound) streakStartQuery = streakStartQuery.gt("created_at", lastOutbound.created_at);
-
-    const { data: streakStart, error: streakError } = await streakStartQuery.maybeSingle();
-    if (streakError) throw streakError;
     if (!streakStart) return;
 
     const settings = await this.getTenantSettings(tenantId);
     const windowMinutes = settings?.default_response_window_minutes ?? 60;
-    const dueAt = new Date(new Date(streakStart.created_at).getTime() + windowMinutes * 60_000).toISOString();
+    const dueAt = new Date(streakStart.createdAt.getTime() + windowMinutes * 60_000);
 
-    const { error } = await this.db
-      .from("conversations")
-      .update({ response_due_at: dueAt, response_overdue_notified_at: null })
-      .eq("id", conversationId);
-    if (error) throw error;
+    await this.orm.update(conversationsTable)
+      .set({ responseDueAt: dueAt, responseOverdueNotifiedAt: null })
+      .where(eq(conversationsTable.id, conversationId));
   }
 
   /** Phase 3's kanban board drag-between-columns write path. Prior to
@@ -2208,42 +2184,41 @@ export class DomainService {
     conversationId: string,
     status: "open" | "pending" | "resolved",
   ): Promise<Conversation> {
-    const { data, error } = await this.db
-      .from("conversations")
-      .update({ status })
-      .eq("id", conversationId)
-      .select("*")
-      .single();
-
-    if (error) throw error;
-    return data;
+    const [updated] = await this.orm
+      .update(conversationsTable)
+      .set({ status })
+      .where(eq(conversationsTable.id, conversationId))
+      .returning();
+    return updated;
   }
 
   async getResolvedConversationExamples(tenantId: string, limit = 5) {
-    const { data: conversations, error } = await this.db
-      .from("conversations")
-      .select("id, summary")
-      .eq("tenant_id", tenantId)
-      .eq("status", "resolved")
-      .not("summary", "is", null)
-      .order("last_message_at", { ascending: false })
-      .limit(limit);
+    const conversations = await this.orm
+      .select({ id: conversationsTable.id, summary: conversationsTable.summary })
+      .from(conversationsTable)
+      .where(and(
+        eq(conversationsTable.tenantId, tenantId),
+        eq(conversationsTable.status, "resolved"),
+        isNotNull(conversationsTable.summary),
+      ))
+      .orderBy(desc(conversationsTable.lastMessageAt)).limit(limit);
 
-    if (error) throw error;
-    if (!conversations?.length) return [];
+    if (!conversations.length) return [];
 
     const ids = conversations.map((c) => c.id);
-    const { data: messages, error: msgError } = await this.db
-      .from("messages")
-      .select("conversation_id, body, direction, sender_type")
-      .in("conversation_id", ids);
-
-    if (msgError) throw msgError;
+    const exampleMessages = await this.orm
+      .select({
+        conversationId: messages.conversationId,
+        body: messages.body,
+        direction: messages.direction,
+        senderType: messages.senderType,
+      })
+      .from(messages).where(inArray(messages.conversationId, ids));
 
     return conversations.map((c) => {
-      const msgs = (messages ?? []).filter((m) => m.conversation_id === c.id);
+      const msgs = exampleMessages.filter((m) => m.conversationId === c.id);
       const sampleReply =
-        msgs.find((m) => m.direction === "outbound" && m.sender_type === "internal_user")
+        msgs.find((m) => m.direction === "outbound" && m.senderType === "internal_user")
           ?.body ?? "";
       return { summary: c.summary, sampleReply };
     });

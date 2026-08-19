@@ -41,7 +41,7 @@ export async function resolveTenantScopedConversation(
   if (!tenant) return { ok: false, status: 404 };
 
   const conversation = await domain.getConversationThread(conversationId);
-  if (!conversation || conversation.tenant_id !== tenant.id) {
+  if (!conversation || conversation.tenantId !== tenant.id) {
     return { ok: false, status: 404 };
   }
 
