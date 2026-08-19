@@ -73,11 +73,17 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO comm_canoe_app;
 -- Tables created by future migrations need the same grants, and DEFAULT
 -- PRIVILEGES is what makes that automatic. Without it, every migration that
 -- adds a table produces one the app cannot read, and the failure surfaces at
--- runtime rather than at migration time. Applies to objects created by the
--- role running this file, which is also the role drizzle-kit will run as.
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
+-- runtime rather than at migration time.
+--
+-- FOR ROLE postgres is load-bearing, not decoration. Default privileges attach
+-- to the role that creates the object, and `pscale sql` connects as a
+-- short-lived pscale_api_* role that will not exist next time. Omitting FOR
+-- ROLE would bind these defaults to that throwaway identity and silently do
+-- nothing for the migrations that matter. `postgres` is the durable role whose
+-- credentials drizzle-kit will run under.
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO comm_canoe_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO comm_canoe_app;
 
 -- Better Auth's tables (user, session, account, verification) are created in
