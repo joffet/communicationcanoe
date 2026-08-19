@@ -6,9 +6,12 @@ import type {
   IdentityContact,
   LogLiveTransferInput,
 } from "@communication-canoe/shared";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import { createDb, type Db } from "../db";
 import {
+  conversations as conversationsTable,
+  conversationAssignees,
+  conversationPersonalTags,
   conversationReadStates,
   messages,
   outboundBatchRecipients,
@@ -1450,43 +1453,61 @@ export class DomainService {
     if (conversations.length === 0) return map;
 
     const conversationIds = conversations.map((c) => c.id);
-    const [assigneeRes, personalTagRes, readStateRes] = await Promise.all([
-      this.db
-        .from("conversation_assignees")
-        .select("conversation_id")
-        .eq("user_id", viewerUserId)
-        .in("conversation_id", conversationIds),
-      this.db
-        .from("conversation_personal_tags")
-        .select("conversation_id")
-        .eq("user_id", viewerUserId)
-        .in("conversation_id", conversationIds),
-      this.db
-        .from("conversation_read_states")
-        .select("conversation_id, last_read_at")
-        .eq("user_id", viewerUserId)
-        .in("conversation_id", conversationIds),
+    const [assigneeRows, personalTagRows, readStateRows] = await Promise.all([
+      this.orm
+        .select({ conversationId: conversationAssignees.conversationId })
+        .from(conversationAssignees)
+        .where(
+          and(
+            eq(conversationAssignees.userId, viewerUserId),
+            inArray(conversationAssignees.conversationId, conversationIds),
+          ),
+        ),
+      this.orm
+        .select({ conversationId: conversationPersonalTags.conversationId })
+        .from(conversationPersonalTags)
+        .where(
+          and(
+            eq(conversationPersonalTags.userId, viewerUserId),
+            inArray(conversationPersonalTags.conversationId, conversationIds),
+          ),
+        ),
+      this.orm
+        .select({
+          conversationId: conversationReadStates.conversationId,
+          lastReadAt: conversationReadStates.lastReadAt,
+        })
+        .from(conversationReadStates)
+        .where(
+          and(
+            eq(conversationReadStates.userId, viewerUserId),
+            inArray(conversationReadStates.conversationId, conversationIds),
+          ),
+        ),
     ]);
-    if (assigneeRes.error) throw assigneeRes.error;
-    if (personalTagRes.error) throw personalTagRes.error;
-    if (readStateRes.error) throw readStateRes.error;
 
+    // Relevance is either signal: an assignment someone else made, or a
+    // personal tag the viewer applied themselves.
     const relevantIds = new Set<string>([
-      ...(assigneeRes.data ?? []).map((r) => r.conversation_id as string),
-      ...(personalTagRes.data ?? []).map((r) => r.conversation_id as string),
+      ...assigneeRows.map((r) => r.conversationId),
+      ...personalTagRows.map((r) => r.conversationId),
     ]);
     const lastReadAtByConversation = new Map(
-      (readStateRes.data ?? []).map((r) => [r.conversation_id as string, r.last_read_at as string]),
+      readStateRows.map((r) => [r.conversationId, r.lastReadAt]),
     );
 
     for (const c of conversations) {
       const isRelevant = relevantIds.has(c.id);
+      // Drizzle returns timestamptz as Date; the conversation rows still come
+      // from unconverted reads, so their last_message_at is an ISO string.
+      // The comparison has to bridge the two until those methods move.
       const lastReadAt = lastReadAtByConversation.get(c.id) ?? null;
-      const hasUnread = isRelevant && (!lastReadAt || new Date(lastReadAt) < new Date(c.last_message_at));
+      const hasUnread =
+        isRelevant && (!lastReadAt || lastReadAt < new Date(c.last_message_at));
       map.set(c.id, {
         viewer_is_relevant: isRelevant,
         viewer_has_unread: hasUnread,
-        viewer_last_read_at: lastReadAt,
+        viewer_last_read_at: lastReadAt ? lastReadAt.toISOString() : null,
       });
     }
     return map;
@@ -1502,19 +1523,34 @@ export class DomainService {
     tenantId: string,
     viewerUserId: string,
   ): Promise<{ unread_relevant_count: number; open_relevant_count: number }> {
-    const { data: conversations, error } = await this.db
-      .from("conversations")
-      .select("id, status, last_message_at")
-      .eq("tenant_id", tenantId)
-      .neq("status", "merged");
-    if (error) throw error;
-    if (!conversations?.length) return { unread_relevant_count: 0, open_relevant_count: 0 };
+    const rows = await this.orm
+      .select({
+        id: conversationsTable.id,
+        status: conversationsTable.status,
+        lastMessageAt: conversationsTable.lastMessageAt,
+      })
+      .from(conversationsTable)
+      .where(
+        and(
+          eq(conversationsTable.tenantId, tenantId),
+          ne(conversationsTable.status, "merged"),
+        ),
+      );
+    if (!rows.length) return { unread_relevant_count: 0, open_relevant_count: 0 };
 
+    // getViewerConversationStates still takes the unconverted row shape, since
+    // its other callers pass conversations fetched through supabase-js. Bridged
+    // here rather than changing that signature, which would pull those callers
+    // into this slice.
+    const conversations = rows.map((r) => ({
+      id: r.id,
+      last_message_at: r.lastMessageAt.toISOString(),
+    }));
     const states = await this.getViewerConversationStates(conversations, viewerUserId);
 
     let unread = 0;
     let open = 0;
-    for (const c of conversations) {
+    for (const c of rows) {
       const state = states.get(c.id);
       if (!state?.viewer_is_relevant) continue;
       if (c.status !== "resolved") open += 1;
