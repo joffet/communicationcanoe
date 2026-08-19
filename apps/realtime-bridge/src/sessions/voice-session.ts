@@ -95,7 +95,7 @@ export class VoiceSession {
     const onCall = await this.domain.getOnCallUsers(tenantId);
     const target = onCall[0];
 
-    if (!target?.phone_number) {
+    if (!target?.phoneNumber) {
       await this.domain.logLiveTransfer({
         tenantId,
         conversationId,
@@ -124,7 +124,7 @@ export class VoiceSession {
     ) {
       const client = Twilio(this.config.twilioAccountSid, this.config.twilioAuthToken);
       await client.calls(this.callSid).update({
-        twiml: `<Response><Say>Connecting you now.</Say><Dial timeout="30" action="${this.config.appUrl}/api/webhooks/twilio/dial-status">${target.phone_number}</Dial></Response>`,
+        twiml: `<Response><Say>Connecting you now.</Say><Dial timeout="30" action="${this.config.appUrl}/api/webhooks/twilio/dial-status">${target.phoneNumber}</Dial></Response>`,
       });
     }
 

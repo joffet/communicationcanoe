@@ -16,11 +16,11 @@ export function TenantForm({ tenant }: TenantFormProps) {
   const router = useRouter();
   const isEdit = Boolean(tenant?.id);
   const [name, setName] = useState(tenant?.name ?? "");
-  const [twilioNumber, setTwilioNumber] = useState(tenant?.twilio_number ?? "");
+  const [twilioNumber, setTwilioNumber] = useState(tenant?.twilioNumber ?? "");
   const [inboundEmail, setInboundEmail] = useState(
-    tenant?.inbound_email_address ?? "",
+    tenant?.inboundEmailAddress ?? "",
   );
-  const [widgetKey] = useState(tenant?.chat_widget_key ?? "");
+  const [widgetKey] = useState(tenant?.chatWidgetKey ?? "");
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

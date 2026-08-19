@@ -16,10 +16,10 @@ export function sortUsers(users: AdminUserRow[], config: SortConfig<UsersSortFie
       case "email":
         return a.email.localeCompare(b.email) * dir;
       case "platform_role":
-        return a.platform_role.localeCompare(b.platform_role) * dir;
+        return a.platformRole.localeCompare(b.platformRole) * dir;
       case "created_at":
         return (
-          (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) *
+          (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) *
           dir
         );
       default:

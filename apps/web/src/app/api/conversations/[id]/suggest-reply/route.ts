@@ -12,7 +12,7 @@ export async function GET(
   const settings = await ctx.domain.getTenantSettings(ctx.thread.tenantId);
   const examples = await ctx.domain.getResolvedConversationExamples(ctx.thread.tenantId);
 
-  const faqRaw = settings?.faq_snippets;
+  const faqRaw = settings?.faqSnippets;
   const faqSnippets = Array.isArray(faqRaw)
     ? (faqRaw as Array<{ q?: string; a?: string }>).map((f) => ({
         q: f.q ?? "",

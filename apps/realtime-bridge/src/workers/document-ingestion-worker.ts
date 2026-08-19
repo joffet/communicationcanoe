@@ -40,7 +40,7 @@ async function ingestPendingDocuments(): Promise<void> {
       const claimed = await domain.claimPendingDocument(id);
       if (!claimed) continue; // another tick already claimed it
 
-      const chunks = chunkDocumentText(claimed.content_text);
+      const chunks = chunkDocumentText(claimed.contentText);
       if (chunks.length === 0) {
         await domain.markDocumentFailed(id, "No content extracted after chunking");
         continue;
@@ -49,9 +49,9 @@ async function ingestPendingDocuments(): Promise<void> {
       // Defensive re-check: the create endpoint enforces the tenant's chunk
       // cap at accept time, but a single large document can still produce
       // more chunks than the remaining budget by the time ingestion runs.
-      const settings = await domain.getTenantSettings(claimed.tenant_id);
-      const maxChunks = settings?.max_knowledge_chunks ?? DEFAULT_MAX_KNOWLEDGE_CHUNKS;
-      const existingChunks = await domain.countTenantChunks(claimed.tenant_id);
+      const settings = await domain.getTenantSettings(claimed.tenantId);
+      const maxChunks = settings?.maxKnowledgeChunks ?? DEFAULT_MAX_KNOWLEDGE_CHUNKS;
+      const existingChunks = await domain.countTenantChunks(claimed.tenantId);
       if (existingChunks + chunks.length > maxChunks) {
         await domain.markDocumentFailed(
           id,
@@ -65,9 +65,9 @@ async function ingestPendingDocuments(): Promise<void> {
 
       await domain.insertDocumentChunks(
         chunks.map((chunk, i) => ({
-          document_id: id,
-          tenant_id: claimed.tenant_id,
-          chunk_index: chunk.chunkIndex,
+          documentId: id,
+          tenantId: claimed.tenantId,
+          chunkIndex: chunk.chunkIndex,
           heading: chunk.heading,
           content: chunk.content,
           embedding: embeddings[i],

@@ -42,11 +42,11 @@ export function TenantsTableSection({ tenants }: TenantsTableSectionProps) {
           {tenants.map((tenant) => (
             <TableRow key={tenant.id}>
               <TableCell className="font-medium">{tenant.name}</TableCell>
-              <TableCell className="font-mono text-xs">{tenant.twilio_number}</TableCell>
-              <TableCell className="text-xs">{tenant.inbound_email_address}</TableCell>
+              <TableCell className="font-mono text-xs">{tenant.twilioNumber}</TableCell>
+              <TableCell className="text-xs">{tenant.inboundEmailAddress}</TableCell>
               <TableCell>{tenant.member_count}</TableCell>
               <TableCell className="text-zinc-500">
-                {formatTenantDate(tenant.created_at)}
+                {formatTenantDate(tenant.createdAt.toISOString())}
               </TableCell>
               <TableCell>
                 <Link

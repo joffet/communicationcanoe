@@ -6,9 +6,19 @@ import type {
   IdentityContact,
   LogLiveTransferInput,
 } from "@communication-canoe/shared";
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm";
 import { createDb, type Db } from "../db";
 import {
+  conversationSplits,
+  documentChunks,
+  documents,
+  liveTransfers,
+  teamMemberships,
+  teams,
+  tenantSettings,
+  tenants,
+  userTenantMemberships,
+  users,
   identities,
   identityConversionLogs,
   identityMergeLogs,
@@ -75,20 +85,13 @@ export class DomainService {
   #orm?: Db;
 
   /**
-   * `db` is supabase-js; `orm` is Drizzle. Both talk to the same Postgres
-   * during the migration - DATABASE_URL is the database supabase-js reaches
-   * through PostgREST - so a converted method reads exactly the rows the
-   * unconverted ones do, and methods can move across one at a time instead of
-   * in one cutover.
+   * Every query in this service is Drizzle now. `db` remains only for the
+   * Supabase Realtime channel used to broadcast conversation changes - a
+   * pub/sub call with no database involved, and the one thing Drizzle does not
+   * replace.
    *
-   * That also separates two changes that are easy to conflate: leaving
-   * supabase-js, and leaving Supabase. This is the first. Moving to PlanetScale
-   * afterwards is a connection string.
-   *
-   * Lazy rather than constructed here: most call sites never touch a converted
-   * method, and building a pool for them would open connections nothing uses.
-   * Tests pass their own handle - a pglite instance - through the second
-   * argument.
+   * The orm handle is lazy so a caller that only broadcasts never opens a pool,
+   * and so tests can pass a pglite instance through the second argument.
    */
   constructor(
     private db: AppSupabaseClient,
@@ -103,46 +106,29 @@ export class DomainService {
 
   async resolveTenantByPhone(phone: string): Promise<Tenant | null> {
     const normalized = normalizePhone(phone);
-    const { data, error } = await this.db
-      .from("tenants")
-      .select("*")
-      .eq("twilio_number", normalized)
-      .maybeSingle();
+    const [byNormalized] = await this.orm
+      .select().from(tenants).where(eq(tenants.twilioNumber, normalized)).limit(1);
+    if (byNormalized) return byNormalized;
 
-    if (error) throw error;
-    if (data) return data;
-
-    const { data: alt, error: altError } = await this.db
-      .from("tenants")
-      .select("*")
-      .eq("twilio_number", phone)
-      .maybeSingle();
-
-    if (altError) throw altError;
-    return alt;
+    // Fall back to the raw value: numbers stored before normalization existed
+    // are still the tenant's, and failing to match one silently drops an
+    // inbound call or text.
+    const [byRaw] = await this.orm
+      .select().from(tenants).where(eq(tenants.twilioNumber, phone)).limit(1);
+    return byRaw ?? null;
   }
 
   async resolveTenantByEmail(email: string): Promise<Tenant | null> {
     const normalized = normalizeEmail(email);
-    const { data, error } = await this.db
-      .from("tenants")
-      .select("*")
-      .eq("inbound_email_address", normalized)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [tenant] = await this.orm
+      .select().from(tenants).where(eq(tenants.inboundEmailAddress, normalized)).limit(1);
+    return tenant ?? null;
   }
 
   async resolveTenantByWidgetKey(key: string): Promise<Tenant | null> {
-    const { data, error } = await this.db
-      .from("tenants")
-      .select("*")
-      .eq("chat_widget_key", key)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [tenant] = await this.orm
+      .select().from(tenants).where(eq(tenants.chatWidgetKey, key)).limit(1);
+    return tenant ?? null;
   }
 
   async findOrCreateAnonymousIdentity(
@@ -210,21 +196,19 @@ export class DomainService {
   }
 
   async logLiveTransfer(input: LogLiveTransferInput): Promise<LiveTransfer> {
-    const { data, error } = await this.db
-      .from("live_transfers")
-      .insert({
-        tenant_id: input.tenantId,
-        conversation_id: input.conversationId,
+    const [transfer] = await this.orm
+      .insert(liveTransfers)
+      .values({
+        tenantId: input.tenantId,
+        conversationId: input.conversationId,
         channel: input.channel,
-        attempted_user_id: input.attemptedUserId ?? null,
-        message_id: input.messageId ?? null,
+        attemptedUserId: input.attemptedUserId ?? null,
+        messageId: input.messageId ?? null,
         outcome: input.outcome,
       })
-      .select("*")
-      .single();
+      .returning();
 
-    if (error) throw error;
-    return data;
+    return transfer;
   }
 
   async updateLiveTransferOutcome(
@@ -233,17 +217,12 @@ export class DomainService {
     attemptedUserId?: string,
   ): Promise<LiveTransfer> {
     const patch: Partial<LiveTransfer> = { outcome };
-    if (attemptedUserId) patch.attempted_user_id = attemptedUserId;
+    if (attemptedUserId) patch.attemptedUserId = attemptedUserId;
 
-    const { data, error } = await this.db
-      .from("live_transfers")
-      .update(patch)
-      .eq("id", transferId)
-      .select("*")
-      .single();
-
-    if (error) throw error;
-    return data;
+    const [updated] = await this.orm
+      .update(liveTransfers).set(patch)
+      .where(eq(liveTransfers.id, transferId)).returning();
+    return updated;
   }
 
   async assignConversationUser(conversationId: string, userId: string | null) {
@@ -281,17 +260,14 @@ export class DomainService {
     // merge's resolve_conversation_id) - a session surviving through two
     // chained splits of the same lineage is a narrow enough edge case to
     // leave as an accepted v1 gap.
-    const { data: latestSplit, error: splitError } = await this.db
-      .from("conversation_splits")
-      .select("target_conversation_id")
-      .eq("source_conversation_id", thread.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (splitError) throw splitError;
+    const [latestSplit] = await this.orm
+      .select({ targetConversationId: conversationSplits.targetConversationId })
+      .from(conversationSplits)
+      .where(eq(conversationSplits.sourceConversationId, thread.id))
+      .orderBy(desc(conversationSplits.createdAt)).limit(1);
 
     if (latestSplit) {
-      const splitTarget = await this.getConversationThread(latestSplit.target_conversation_id);
+      const splitTarget = await this.getConversationThread(latestSplit.targetConversationId);
       if (splitTarget && splitTarget.status === "open") {
         return { conversation: splitTarget, identity: splitTarget.identity };
       }
@@ -310,24 +286,19 @@ export class DomainService {
     }
     if (!teamIds.length) return [];
 
-    const { data: memberships, error } = await this.db
-      .from("team_memberships")
-      .select("user_id, team_id, is_on_call")
-      .in("team_id", teamIds)
-      .eq("is_on_call", true);
+    const memberships = await this.orm
+      .select({ userId: teamMemberships.userId })
+      .from(teamMemberships)
+      .where(and(
+        inArray(teamMemberships.teamId, teamIds),
+        eq(teamMemberships.isOnCall, true),
+      ));
+    if (!memberships.length) return [];
 
-    if (error) throw error;
-    if (!memberships?.length) return [];
-
-    const userIds = [...new Set(memberships.map((m) => m.user_id))];
-    const { data: users, error: userError } = await this.db
-      .from("users")
-      .select("*")
-      .in("id", userIds)
-      .eq("available_for_calls", true);
-
-    if (userError) throw userError;
-    return users ?? [];
+    const userIds = [...new Set(memberships.map((m) => m.userId))];
+    return this.orm
+      .select().from(users)
+      .where(and(inArray(users.id, userIds), eq(users.availableForCalls, true)));
   }
 
   async findOrCreateIdentity(
@@ -471,7 +442,7 @@ export class DomainService {
     }
 
     const settings = await this.getTenantSettings(tenantId);
-    const stalenessMinutes = settings?.conversation_staleness_minutes ?? 1440;
+    const stalenessMinutes = settings?.conversationStalenessMinutes ?? 1440;
     const staleBefore = Date.now() - stalenessMinutes * 60_000;
     const isStale = new Date(selected.lastMessageAt).getTime() < staleBefore;
 
@@ -742,8 +713,7 @@ export class DomainService {
   }): Promise<OutboundBatch> {
     // One transaction: a batch row claiming N recipients, with no recipient
     // rows behind it, would leave the worker reporting a batch that can never
-    // complete. supabase-js could not express this - the two inserts were
-    // separate round trips with a window between them.
+    // complete. This was two separate round trips with a window between them.
     return this.orm.transaction(async (tx) => {
       const [batch] = await tx
         .insert(outboundBatches)
@@ -958,43 +928,44 @@ export class DomainService {
     outcome: "success" | "hard_failure",
     threshold: number,
   ): Promise<{ crossedThreshold: boolean; clearedFlag: boolean }> {
-    const { data: identity, error: fetchError } = await this.db
-      .from("identities")
-      .select("email_consecutive_failures, phone_consecutive_failures, email_flagged_at, phone_flagged_at")
-      .eq("id", identityId)
-      .single();
-    if (fetchError) throw fetchError;
+    const [identity] = await this.orm
+      .select({
+        emailConsecutiveFailures: identities.emailConsecutiveFailures,
+        phoneConsecutiveFailures: identities.phoneConsecutiveFailures,
+        emailFlaggedAt: identities.emailFlaggedAt,
+        phoneFlaggedAt: identities.phoneFlaggedAt,
+      })
+      .from(identities).where(eq(identities.id, identityId)).limit(1);
+    if (!identity) throw new Error(`Unknown identity: ${identityId}`);
 
     if (outcome === "success") {
-      const wasFlagged = Boolean(channel === "email" ? identity.email_flagged_at : identity.phone_flagged_at);
+      const wasFlagged = Boolean(channel === "email" ? identity.emailFlaggedAt : identity.phoneFlaggedAt);
       const update =
         channel === "email"
-          ? { email_consecutive_failures: 0, email_flagged_at: null }
-          : { phone_consecutive_failures: 0, phone_flagged_at: null };
-      const { error } = await this.db.from("identities").update(update).eq("id", identityId);
-      if (error) throw error;
+          ? { emailConsecutiveFailures: 0, emailFlaggedAt: null }
+          : { phoneConsecutiveFailures: 0, phoneFlaggedAt: null };
+      await this.orm.update(identities).set(update).where(eq(identities.id, identityId));
       return { crossedThreshold: false, clearedFlag: wasFlagged };
     }
 
     const currentCount =
-      channel === "email" ? identity.email_consecutive_failures : identity.phone_consecutive_failures;
-    const alreadyFlagged = Boolean(channel === "email" ? identity.email_flagged_at : identity.phone_flagged_at);
+      channel === "email" ? identity.emailConsecutiveFailures : identity.phoneConsecutiveFailures;
+    const alreadyFlagged = Boolean(channel === "email" ? identity.emailFlaggedAt : identity.phoneFlaggedAt);
     const newCount = currentCount + 1;
     const crossedThreshold = newCount >= threshold && !alreadyFlagged;
 
     const update =
       channel === "email"
         ? {
-            email_consecutive_failures: newCount,
-            ...(crossedThreshold ? { email_flagged_at: new Date().toISOString() } : {}),
+            emailConsecutiveFailures: newCount,
+            ...(crossedThreshold ? { emailFlaggedAt: new Date() } : {}),
           }
         : {
-            phone_consecutive_failures: newCount,
-            ...(crossedThreshold ? { phone_flagged_at: new Date().toISOString() } : {}),
+            phoneConsecutiveFailures: newCount,
+            ...(crossedThreshold ? { phoneFlaggedAt: new Date() } : {}),
           };
 
-    const { error } = await this.db.from("identities").update(update).eq("id", identityId);
-    if (error) throw error;
+    await this.orm.update(identities).set(update).where(eq(identities.id, identityId));
 
     return { crossedThreshold, clearedFlag: false };
   }
@@ -1057,11 +1028,10 @@ export class DomainService {
    * resolve_conversation_id, mirroring resolveIdentityId's role for
    * identities. */
   async resolveConversationId(conversationId: string): Promise<string> {
-    const { data, error } = await this.db.rpc("resolve_conversation_id", {
-      p_conversation_id: conversationId,
-    });
-    if (error) throw error;
-    return data as string;
+    const result = (await this.orm.execute(
+      sql`SELECT resolve_conversation_id(${conversationId}::uuid) AS id`,
+    )) as { rows: Array<{ id: string }> };
+    return result.rows[0].id;
   }
 
   /** Phase 7: given a canonical conversation id, returns it plus every id
@@ -1212,14 +1182,9 @@ export class DomainService {
   }
 
   async getTeamsForTenant(tenantId: string): Promise<Team[]> {
-    const { data, error } = await this.db
-      .from("teams")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .order("name");
-
-    if (error) throw error;
-    return data ?? [];
+    return this.orm
+      .select().from(teams)
+      .where(eq(teams.tenantId, tenantId)).orderBy(asc(teams.name));
   }
 
   async assignConversationTeam(conversationId: string, teamId: string | null) {
@@ -1256,28 +1221,27 @@ export class DomainService {
   }
 
   async addConversationTag(conversationId: string, tagId: string): Promise<void> {
-    const { error } = await this.db
-      .from("conversation_tags")
-      .upsert({ conversation_id: conversationId, tag_id: tagId }, { onConflict: "conversation_id,tag_id" });
-    if (error) throw error;
+    await this.orm.insert(conversationTags)
+      .values({ conversationId, tagId }).onConflictDoNothing();
   }
 
   async removeConversationTag(conversationId: string, tagId: string): Promise<void> {
-    const { error } = await this.db
-      .from("conversation_tags")
-      .delete()
-      .eq("conversation_id", conversationId)
-      .eq("tag_id", tagId);
-    if (error) throw error;
+    await this.orm.delete(conversationTags).where(and(
+      eq(conversationTags.conversationId, conversationId),
+      eq(conversationTags.tagId, tagId),
+    ));
   }
 
   async listConversationTags(conversationId: string): Promise<Tag[]> {
-    const { data, error } = await this.db
-      .from("conversation_tags")
-      .select("tags(*)")
-      .eq("conversation_id", conversationId);
-    if (error) throw error;
-    return ((data ?? []) as unknown as Array<{ tags: Tag | null }>).flatMap((r) => (r.tags ? [r.tags] : []));
+    // The second and last of PostgREST's embedded selects. As a real join the
+    // inner-ness is explicit: a tag deleted out from under the link row drops
+    // out, which is what the old flatMap over a nullable `tags` did anyway.
+    const rows = await this.orm
+      .select({ tag: tags })
+      .from(conversationTags)
+      .innerJoin(tags, eq(tags.id, conversationTags.tagId))
+      .where(eq(conversationTags.conversationId, conversationId));
+    return rows.map((r) => r.tag);
   }
 
   // ---- Multi-assignee (Phase 2 / 2B) — additive alongside assignConversationUser/Team above ----
@@ -1303,12 +1267,10 @@ export class DomainService {
   }
 
   async removeConversationAssignee(conversationId: string, userId: string): Promise<void> {
-    const { error } = await this.db
-      .from("conversation_assignees")
-      .delete()
-      .eq("conversation_id", conversationId)
-      .eq("user_id", userId);
-    if (error) throw error;
+    await this.orm.delete(conversationAssignees).where(and(
+      eq(conversationAssignees.conversationId, conversationId),
+      eq(conversationAssignees.userId, userId),
+    ));
   }
 
   async listConversationAssignees(conversationId: string): Promise<ConversationAssignee[]> {
@@ -1322,32 +1284,27 @@ export class DomainService {
   // "relevant to me" marker than assignees, same shape/dedup pattern. ----
 
   async addConversationPersonalTag(conversationId: string, userId: string): Promise<ConversationPersonalTag> {
-    const { data, error } = await this.db
-      .from("conversation_personal_tags")
-      .upsert({ conversation_id: conversationId, user_id: userId }, { onConflict: "conversation_id,user_id" })
-      .select("*")
-      .single();
-
-    if (error) throw error;
-    return data;
+    const [tag] = await this.orm
+      .insert(conversationPersonalTags)
+      .values({ conversationId, userId })
+      .onConflictDoUpdate({
+        target: [conversationPersonalTags.conversationId, conversationPersonalTags.userId],
+        set: { conversationId },
+      })
+      .returning();
+    return tag;
   }
 
   async removeConversationPersonalTag(conversationId: string, userId: string): Promise<void> {
-    const { error } = await this.db
-      .from("conversation_personal_tags")
-      .delete()
-      .eq("conversation_id", conversationId)
-      .eq("user_id", userId);
-    if (error) throw error;
+    await this.orm.delete(conversationPersonalTags).where(and(
+      eq(conversationPersonalTags.conversationId, conversationId),
+      eq(conversationPersonalTags.userId, userId),
+    ));
   }
 
   async listConversationPersonalTags(conversationId: string): Promise<ConversationPersonalTag[]> {
-    const { data, error } = await this.db
-      .from("conversation_personal_tags")
-      .select("*")
-      .eq("conversation_id", conversationId);
-    if (error) throw error;
-    return data ?? [];
+    return this.orm.select().from(conversationPersonalTags)
+      .where(eq(conversationPersonalTags.conversationId, conversationId));
   }
 
   // ---- Per-user read tracking (Reside dashboard unread counts) ----
@@ -1488,10 +1445,6 @@ export class DomainService {
       );
     if (!rows.length) return { unread_relevant_count: 0, open_relevant_count: 0 };
 
-    // getViewerConversationStates still takes the unconverted row shape, since
-    // its other callers pass conversations fetched through supabase-js. Bridged
-    // here rather than changing that signature, which would pull those callers
-    // into this slice.
     const conversations = rows.map((r) => ({
       id: r.id,
       lastMessageAt: r.lastMessageAt,
@@ -1532,12 +1485,10 @@ export class DomainService {
   }
 
   async removeConversationParticipant(conversationId: string, participantId: string): Promise<void> {
-    const { error } = await this.db
-      .from("conversation_participants")
-      .delete()
-      .eq("conversation_id", conversationId)
-      .eq("id", participantId);
-    if (error) throw error;
+    await this.orm.delete(conversationParticipants).where(and(
+      eq(conversationParticipants.conversationId, conversationId),
+      eq(conversationParticipants.id, participantId),
+    ));
   }
 
   async listConversationParticipants(conversationId: string): Promise<ConversationParticipant[]> {
@@ -1855,11 +1806,10 @@ export class DomainService {
       // independent pointers to the same event (conversation_id NOT NULL,
       // message_id nullable); left unfixed they'd actively disagree, not
       // just go stale, once the referenced message moves.
-      const { error: liveTransferError } = await this.db
-        .from("live_transfers")
-        .update({ conversation_id: target.id })
-        .in("message_id", movedIds);
-      if (liveTransferError) throw liveTransferError;
+      await this.orm
+        .update(liveTransfers)
+        .set({ conversationId: target.id })
+        .where(inArray(liveTransfers.messageId, movedIds));
     }
 
     const [latestRemaining] = await this.orm
@@ -1882,15 +1832,15 @@ export class DomainService {
       this.recomputeConversationSla(tenantId, target.id),
     ]);
 
-    const { error: logError } = await this.db.from("conversation_splits").insert({
-      tenant_id: tenantId,
-      source_conversation_id: canonicalSourceId,
-      target_conversation_id: target.id,
-      split_message_id: splitMessageId,
-      trigger_type: options?.triggerType ?? "admin",
-      triggered_by_user_id: actorUserId,
+    const logError = await this.orm.insert(conversationSplits).values({
+      tenantId,
+      sourceConversationId: canonicalSourceId,
+      targetConversationId: target.id,
+      splitMessageId,
+      triggerType: options?.triggerType ?? "admin",
+      triggeredByUserId: actorUserId,
       reasoning: options?.reasoning ?? null,
-    });
+    }).then(() => null).catch((e: unknown) => e);
     if (logError) throw logError;
 
     await Promise.all([
@@ -1943,16 +1893,16 @@ export class DomainService {
    * tenant," so this caps the blast radius of a systematic misfire rather
    * than relying on per-instance reversibility alone. */
   async countRecentAiSplits(tenantId: string, sinceMinutes: number): Promise<number> {
-    const since = new Date(Date.now() - sinceMinutes * 60_000).toISOString();
-    const { count, error } = await this.db
-      .from("conversation_splits")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", tenantId)
-      .eq("trigger_type", "ai")
-      .gte("created_at", since);
-
-    if (error) throw error;
-    return count ?? 0;
+    const since = new Date(Date.now() - sinceMinutes * 60_000);
+    const [row] = await this.orm
+      .select({ value: count() })
+      .from(conversationSplits)
+      .where(and(
+        eq(conversationSplits.tenantId, tenantId),
+        eq(conversationSplits.triggerType, "ai"),
+        gte(conversationSplits.createdAt, since),
+      ));
+    return row?.value ?? 0;
   }
 
   /** "How did this conversation come to exist via a split, if it did" -
@@ -1966,19 +1916,21 @@ export class DomainService {
     reasoning: string | null;
     createdAt: string;
   } | null> {
-    const { data, error } = await this.db
-      .from("conversation_splits")
-      .select("source_conversation_id, trigger_type, reasoning, created_at")
-      .eq("target_conversation_id", conversationId)
-      .maybeSingle();
-
-    if (error) throw error;
+    const [data] = await this.orm
+      .select({
+        source_conversation_id: conversationSplits.sourceConversationId,
+        trigger_type: conversationSplits.triggerType,
+        reasoning: conversationSplits.reasoning,
+        created_at: conversationSplits.createdAt,
+      })
+      .from(conversationSplits)
+      .where(eq(conversationSplits.targetConversationId, conversationId)).limit(1);
     if (!data) return null;
     return {
       sourceConversationId: data.source_conversation_id,
       triggerType: data.trigger_type as "admin" | "ai",
       reasoning: data.reasoning,
-      createdAt: data.created_at,
+      createdAt: data.created_at.toISOString(),
     };
   }
 
@@ -2161,7 +2113,7 @@ export class DomainService {
     if (!streakStart) return;
 
     const settings = await this.getTenantSettings(tenantId);
-    const windowMinutes = settings?.default_response_window_minutes ?? 60;
+    const windowMinutes = settings?.defaultResponseWindowMinutes ?? 60;
     const dueAt = new Date(streakStart.createdAt.getTime() + windowMinutes * 60_000);
 
     await this.orm.update(conversationsTable)
@@ -2225,14 +2177,10 @@ export class DomainService {
   }
 
   async getTenantSettings(tenantId: string) {
-    const { data, error } = await this.db
-      .from("tenant_settings")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [settings] = await this.orm
+      .select().from(tenantSettings)
+      .where(eq(tenantSettings.tenantId, tenantId)).limit(1);
+    return settings ?? null;
   }
 
   /** First application-layer write path to tenant_settings - previously only
@@ -2243,33 +2191,31 @@ export class DomainService {
     tenantId: string,
     patch: Partial<Omit<TenantSettingsRow, "tenant_id" | "updated_at">>,
   ): Promise<TenantSettingsRow> {
-    const { data, error } = await this.db
-      .from("tenant_settings")
-      .upsert({ tenant_id: tenantId, ...patch, updated_at: new Date().toISOString() }, { onConflict: "tenant_id" })
-      .select("*")
-      .single();
-
-    if (error) throw error;
-    return data;
+    const [settings] = await this.orm
+      .insert(tenantSettings)
+      .values({ tenantId, ...patch, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: tenantSettings.tenantId,
+        set: { ...patch, updatedAt: new Date() },
+      })
+      .returning();
+    return settings;
   }
 
   async getUserTenants(userId: string) {
-    const { data: memberships, error } = await this.db
-      .from("user_tenant_memberships")
-      .select("tenant_id, role")
-      .eq("user_id", userId);
-
-    if (error) throw error;
-    if (!memberships?.length) return [];
+    const memberships = await this.orm
+      .select({
+        tenant_id: userTenantMemberships.tenantId,
+        role: userTenantMemberships.role,
+      })
+      .from(userTenantMemberships)
+      .where(eq(userTenantMemberships.userId, userId));
+    if (!memberships.length) return [];
 
     const tenantIds = memberships.map((m) => m.tenant_id);
-    const { data: tenants, error: tenantError } = await this.db
-      .from("tenants")
-      .select("*")
-      .in("id", tenantIds);
-
-    if (tenantError) throw tenantError;
-    const tenantMap = new Map((tenants ?? []).map((t) => [t.id, t]));
+    const tenantRows = await this.orm
+      .select().from(tenants).where(inArray(tenants.id, tenantIds));
+    const tenantMap = new Map(tenantRows.map((t) => [t.id, t]));
 
     return memberships.map((row) => ({
       role: row.role,
@@ -2286,23 +2232,17 @@ export class DomainService {
    * too before ever calling here (defense in depth), but this is the real
    * boundary since a client can call this endpoint directly. */
   async countTenantDocuments(tenantId: string): Promise<number> {
-    const { count, error } = await this.db
-      .from("documents")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", tenantId);
-
-    if (error) throw error;
-    return count ?? 0;
+    const [row] = await this.orm
+      .select({ value: count() }).from(documents)
+      .where(eq(documents.tenantId, tenantId));
+    return row?.value ?? 0;
   }
 
   async countTenantChunks(tenantId: string): Promise<number> {
-    const { count, error } = await this.db
-      .from("document_chunks")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", tenantId);
-
-    if (error) throw error;
-    return count ?? 0;
+    const [row] = await this.orm
+      .select({ value: count() }).from(documentChunks)
+      .where(eq(documentChunks.tenantId, tenantId));
+    return row?.value ?? 0;
   }
 
   async createDocument(input: {
@@ -2313,64 +2253,53 @@ export class DomainService {
     pageCount?: number | null;
     uploadedBy?: string | null;
   }): Promise<Document> {
-    const { data, error } = await this.db
-      .from("documents")
-      .insert({
-        tenant_id: input.tenantId,
+    const [document] = await this.orm
+      .insert(documents)
+      .values({
+        tenantId: input.tenantId,
         filename: input.filename,
-        content_text: input.contentText,
+        contentText: input.contentText,
         extractor: input.extractor,
-        page_count: input.pageCount ?? null,
-        uploaded_by: input.uploadedBy ?? null,
+        pageCount: input.pageCount ?? null,
+        uploadedBy: input.uploadedBy ?? null,
       })
-      .select("*")
-      .single();
+      .returning();
 
-    if (error) throw error;
-    return data;
+    return document;
   }
 
   async listDocumentsForTenant(tenantId: string): Promise<Document[]> {
-    const { data, error } = await this.db
-      .from("documents")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .order("created_at", { ascending: false });
-
-    if (error) throw error;
-    return data ?? [];
+    return this.orm
+      .select().from(documents)
+      .where(eq(documents.tenantId, tenantId))
+      .orderBy(desc(documents.createdAt));
   }
 
   async getDocument(tenantId: string, documentId: string): Promise<Document | null> {
-    const { data, error } = await this.db
-      .from("documents")
-      .select("*")
-      .eq("id", documentId)
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    // Scoped by tenant as well as id: a document id is not proof of ownership.
+    const [document] = await this.orm
+      .select().from(documents)
+      .where(and(eq(documents.id, documentId), eq(documents.tenantId, tenantId)))
+      .limit(1);
+    return document ?? null;
   }
 
   /** document_chunks.document_id has ON DELETE CASCADE (migration
    * 20250701001500) - deleting the document row cleans up its chunks
    * automatically, no app-layer delete-then-delete needed. */
   async deleteDocument(tenantId: string, documentId: string): Promise<void> {
-    const { error } = await this.db.from("documents").delete().eq("id", documentId).eq("tenant_id", tenantId);
-    if (error) throw error;
+    await this.orm.delete(documents).where(and(
+      eq(documents.id, documentId),
+      eq(documents.tenantId, tenantId),
+    ));
   }
 
   async listPendingDocumentIds(limit: number): Promise<string[]> {
-    const { data, error } = await this.db
-      .from("documents")
-      .select("id")
-      .eq("status", "pending")
-      .order("created_at", { ascending: true })
-      .limit(limit);
-
-    if (error) throw error;
-    return (data ?? []).map((row) => row.id as string);
+    const rows = await this.orm
+      .select({ id: documents.id }).from(documents)
+      .where(eq(documents.status, "pending"))
+      .orderBy(asc(documents.createdAt)).limit(limit);
+    return rows.map((row) => row.id);
   }
 
   /** Same atomic-claim shape as claimTopicCheckMessage (Phase 9) - chunking
@@ -2378,30 +2307,24 @@ export class DomainService {
    * conditional update on the terminal write wouldn't stop two overlapping
    * worker ticks from both ingesting the same document. */
   async claimPendingDocument(documentId: string): Promise<Document | null> {
-    const { data, error } = await this.db
-      .from("documents")
-      .update({ status: "processing", updated_at: new Date().toISOString() })
-      .eq("id", documentId)
-      .eq("status", "pending")
-      .select("*")
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [claimed] = await this.orm
+      .update(documents)
+      .set({ status: "processing", updatedAt: new Date() })
+      .where(and(eq(documents.id, documentId), eq(documents.status, "pending")))
+      .returning();
+    return claimed ?? null;
   }
 
   async insertDocumentChunks(chunks: DocumentChunkInsert[]): Promise<void> {
     if (chunks.length === 0) return;
-    const { error } = await this.db.from("document_chunks").insert(chunks);
-    if (error) throw error;
+    await this.orm.insert(documentChunks).values(chunks);
   }
 
   async markDocumentReady(documentId: string): Promise<void> {
-    const { error } = await this.db
-      .from("documents")
-      .update({ status: "ready", failure_reason: null, updated_at: new Date().toISOString() })
-      .eq("id", documentId);
-    if (error) throw error;
+    await this.orm
+      .update(documents)
+      .set({ status: "ready", failureReason: null, updatedAt: new Date() })
+      .where(eq(documents.id, documentId));
   }
 
   /** Never left stuck at pending/processing - every ingestion failure path
@@ -2409,11 +2332,10 @@ export class DomainService {
    * mid-tick) ends here with a reason, matching every other worker's
    * safety-net convention in this codebase. */
   async markDocumentFailed(documentId: string, reason: string): Promise<void> {
-    const { error } = await this.db
-      .from("documents")
-      .update({ status: "failed", failure_reason: reason, updated_at: new Date().toISOString() })
-      .eq("id", documentId);
-    if (error) throw error;
+    await this.orm
+      .update(documents)
+      .set({ status: "failed", failureReason: reason, updatedAt: new Date() })
+      .where(eq(documents.id, documentId));
   }
 
   /** Exact (not approximate/HNSW) cosine similarity scan via the
@@ -2431,12 +2353,17 @@ export class DomainService {
     const maxPerDocument = options?.maxPerDocument ?? 3;
     const fetchMultiplier = options?.fetchMultiplier ?? 4;
 
-    const { data, error } = await this.db.rpc("match_document_chunks", {
-      p_tenant_id: tenantId,
-      p_query_embedding: queryEmbedding,
-      p_match_count: topK * fetchMultiplier,
-    });
-    if (error) throw error;
+    // The embedding is passed as a pgvector literal - a bare JS array binds as
+    // a Postgres array, which the vector parameter will not accept.
+    const embeddingLiteral = `[${queryEmbedding.join(",")}]`;
+    const matched = (await this.orm.execute(
+      sql`SELECT * FROM match_document_chunks(
+        ${tenantId}::uuid,
+        ${embeddingLiteral}::vector,
+        ${topK * fetchMultiplier}::int
+      )`,
+    )) as { rows: Array<{ id: string; document_id: string; heading: string | null; content: string }> };
+    const data = matched.rows;
 
     const perDocumentCount = new Map<string, number>();
     const result: Array<{ id: string; documentId: string; heading: string | null; content: string }> = [];

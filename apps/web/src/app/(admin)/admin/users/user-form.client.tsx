@@ -34,12 +34,12 @@ export function UserForm({ user, tenants }: UserFormProps) {
   const isEdit = Boolean(user?.id);
   const [email, setEmail] = useState(user?.email ?? "");
   const [name, setName] = useState(user?.name ?? "");
-  const [phoneNumber, setPhoneNumber] = useState(user?.phone_number ?? "");
+  const [phoneNumber, setPhoneNumber] = useState(user?.phoneNumber ?? "");
   const [availableForCalls, setAvailableForCalls] = useState(
-    user?.available_for_calls ?? false,
+    user?.availableForCalls ?? false,
   );
   const [isSuperAdmin, setIsSuperAdmin] = useState(
-    user?.platform_role === "super_admin",
+    user?.platformRole === "super_admin",
   );
   const [sendInvite, setSendInvite] = useState(true);
   const [memberships, setMemberships] = useState<UserMembershipInput[]>(

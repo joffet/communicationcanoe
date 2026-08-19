@@ -20,7 +20,7 @@ export function sortTenants(
         return (a.member_count - b.member_count) * dir;
       case "created_at":
         return (
-          (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) *
+          (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) *
           dir
         );
       default:
@@ -35,8 +35,8 @@ export function tenantMatchesSearch(tenant: AdminTenantRow, query: string): bool
   const q = query.toLowerCase();
   return (
     tenant.name.toLowerCase().includes(q) ||
-    tenant.twilio_number.toLowerCase().includes(q) ||
-    tenant.inbound_email_address.toLowerCase().includes(q)
+    tenant.twilioNumber.toLowerCase().includes(q) ||
+    tenant.inboundEmailAddress.toLowerCase().includes(q)
   );
 }
 

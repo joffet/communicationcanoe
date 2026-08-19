@@ -22,13 +22,13 @@ function withOpenTrackingPixel(html: string, messageId: string): string {
 function withMemberPortalLink(
   html: string,
   conversationId: string,
-  tenant?: { reside_app_url?: string | null } | null,
+  tenant?: { resideAppUrl?: string | null } | null,
 ): string {
   // Prefer this client's own reside host (derived from its routingDomain) so a
   // One Cardiff resident is sent to One Cardiff's portal, not a shared one. The
   // env var remains the fallback for tenants provisioned before reside_app_url
   // existed, or clients with no routing domain configured.
-  const resideAppUrl = tenant?.reside_app_url || process.env.RESIDE_APP_URL;
+  const resideAppUrl = tenant?.resideAppUrl || process.env.RESIDE_APP_URL;
   if (!resideAppUrl) return html;
 
   const base = resideAppUrl.replace(/\/+$/, "");
@@ -51,7 +51,7 @@ export async function dispatchOutboundMessage(params: {
 
   try {
     if (message.channel === "sms") {
-      const result = await sendSms({ to, from: tenant.twilio_number, body: message.body });
+      const result = await sendSms({ to, from: tenant.twilioNumber, body: message.body });
       return await domain.updateMessageDeliveryStatus(message.id, {
         deliveryStatus: "sent",
         providerMessageId: result.sid,

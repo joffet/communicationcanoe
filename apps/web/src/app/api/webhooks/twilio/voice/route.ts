@@ -43,8 +43,8 @@ export async function POST(request: Request) {
   let greeting = DEFAULT_GREETING;
   if (tenant) {
     const settings = await domain.getTenantSettings(tenant.id);
-    if (settings?.greeting_message) {
-      greeting = settings.greeting_message;
+    if (settings?.greetingMessage) {
+      greeting = settings.greetingMessage;
     }
   }
 

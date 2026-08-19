@@ -69,7 +69,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   void notifyResideActivity({
     // reside's own identifier, NOT tenantId - reside matches this against its
     // own client records and would never recognise comm-canoe's internal uuid.
-    resideClientUid: tenant.reside_client_uid,
+    resideClientUid: tenant.resideClientUid,
     conversationId: id,
     summary: `New message from ${identity.name ?? identity.email ?? identity.phone ?? "a resident"}`,
   });
