@@ -30,5 +30,5 @@ export async function POST(request: Request) {
     recipients,
   });
 
-  return Response.json({ batchId: batch.id, totalRecipients: batch.total_recipients });
+  return Response.json({ batchId: batch.id, totalRecipients: batch.totalRecipients });
 }

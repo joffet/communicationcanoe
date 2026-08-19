@@ -61,23 +61,23 @@ async function drainPendingRecipients(): Promise<void> {
       const claimed = await domain.claimOutboundBatchRecipient(recipient.id);
       if (!claimed) continue;
 
-      let tenant = tenantCache.get(recipient.tenant_id);
+      let tenant = tenantCache.get(recipient.tenantId);
       if (tenant === undefined) {
-        tenant = await admin.getTenantById(recipient.tenant_id);
-        tenantCache.set(recipient.tenant_id, tenant);
+        tenant = await admin.getTenantById(recipient.tenantId);
+        tenantCache.set(recipient.tenantId, tenant);
       }
       if (!tenant) {
-        await failRecipient(domain, recipient.id, recipient.batch_id, `Unknown tenant: ${recipient.tenant_id}`);
+        await failRecipient(domain, recipient.id, recipient.batchId, `Unknown tenant: ${recipient.tenantId}`);
         continue;
       }
 
-      let batch = batchCache.get(recipient.batch_id);
+      let batch = batchCache.get(recipient.batchId);
       if (batch === undefined) {
-        batch = await domain.getOutboundBatch(recipient.batch_id);
-        batchCache.set(recipient.batch_id, batch);
+        batch = await domain.getOutboundBatch(recipient.batchId);
+        batchCache.set(recipient.batchId, batch);
       }
 
-      const identity = recipient.identity_contact as {
+      const identity = recipient.identityContact as {
         phone?: string;
         email?: string;
         name?: string;
@@ -89,22 +89,22 @@ async function drainPendingRecipients(): Promise<void> {
         await failRecipient(
           domain,
           recipient.id,
-          recipient.batch_id,
+          recipient.batchId,
           `identity is missing ${recipient.channel === "sms" ? "phone" : "email"}`,
         );
         continue;
       }
 
-      const resolvedIdentity = await domain.findOrCreateIdentity(recipient.tenant_id, identity);
+      const resolvedIdentity = await domain.findOrCreateIdentity(recipient.tenantId, identity);
       // Outbound/system-attributed send - no topic to classify, isStale is
       // irrelevant here (Phase 9's staleness check only matters for
       // inbound resident messages).
-      const { conversation } = await domain.findOrCreateConversation(recipient.tenant_id, resolvedIdentity.id, {
+      const { conversation } = await domain.findOrCreateConversation(recipient.tenantId, resolvedIdentity.id, {
         channel: recipient.channel,
       });
 
       const message = await domain.appendMessage({
-        tenantId: recipient.tenant_id,
+        tenantId: recipient.tenantId,
         conversationId: conversation.id,
         channel: recipient.channel,
         direction: "outbound",
@@ -123,13 +123,13 @@ async function drainPendingRecipients(): Promise<void> {
         messageId: sent.id,
         error: sent.delivery_error ?? null,
       });
-      await domain.incrementOutboundBatchCompleted(recipient.batch_id);
+      await domain.incrementOutboundBatchCompleted(recipient.batchId);
     } catch (err) {
       console.error(`[outbound-batch-worker] recipient ${recipient.id} failed:`, err);
       await failRecipient(
         domain,
         recipient.id,
-        recipient.batch_id,
+        recipient.batchId,
         err instanceof Error ? err.message : String(err),
       ).catch((innerErr) => {
         console.error(`[outbound-batch-worker] failed to record failure for ${recipient.id}:`, innerErr);

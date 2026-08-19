@@ -6,6 +6,9 @@ import type {
   IdentityContact,
   LogLiveTransferInput,
 } from "@communication-canoe/shared";
+import { and, asc, eq, inArray, lt } from "drizzle-orm";
+import { createDb, type Db } from "../db";
+import { messages, outboundBatchRecipients, outboundBatches } from "../schema";
 import type { AppSupabaseClient } from "../client";
 import { createServiceClient, normalizeEmail, normalizePhone } from "../client";
 import {
@@ -55,7 +58,34 @@ function normalizeEmailSubject(subject: string): string {
 }
 
 export class DomainService {
-  constructor(private db: AppSupabaseClient) {}
+  #orm?: Db;
+
+  /**
+   * `db` is supabase-js; `orm` is Drizzle. Both talk to the same Postgres
+   * during the migration - DATABASE_URL is the database supabase-js reaches
+   * through PostgREST - so a converted method reads exactly the rows the
+   * unconverted ones do, and methods can move across one at a time instead of
+   * in one cutover.
+   *
+   * That also separates two changes that are easy to conflate: leaving
+   * supabase-js, and leaving Supabase. This is the first. Moving to PlanetScale
+   * afterwards is a connection string.
+   *
+   * Lazy rather than constructed here: most call sites never touch a converted
+   * method, and building a pool for them would open connections nothing uses.
+   * Tests pass their own handle - a pglite instance - through the second
+   * argument.
+   */
+  constructor(
+    private db: AppSupabaseClient,
+    ormOverride?: Db,
+  ) {
+    this.#orm = ormOverride;
+  }
+
+  protected get orm(): Db {
+    return (this.#orm ??= createDb());
+  }
 
   async resolveTenantByPhone(phone: string): Promise<Tenant | null> {
     const normalized = normalizePhone(phone);
@@ -738,53 +768,55 @@ export class DomainService {
     body: string;
     recipients: IdentityContact[];
   }): Promise<OutboundBatch> {
-    const { data: batch, error: batchError } = await this.db
-      .from("outbound_batches")
-      .insert({
-        tenant_id: input.tenantId,
-        channel: input.channel,
-        subject: input.subject ?? null,
-        total_recipients: input.recipients.length,
-      })
-      .select("*")
-      .single();
+    // One transaction: a batch row claiming N recipients, with no recipient
+    // rows behind it, would leave the worker reporting a batch that can never
+    // complete. supabase-js could not express this - the two inserts were
+    // separate round trips with a window between them.
+    return this.orm.transaction(async (tx) => {
+      const [batch] = await tx
+        .insert(outboundBatches)
+        .values({
+          tenantId: input.tenantId,
+          channel: input.channel,
+          subject: input.subject ?? null,
+          totalRecipients: input.recipients.length,
+        })
+        .returning();
 
-    if (batchError) throw batchError;
+      await tx.insert(outboundBatchRecipients).values(
+        input.recipients.map((identity) => ({
+          batchId: batch.id,
+          tenantId: input.tenantId,
+          channel: input.channel,
+          identityContact: identity,
+          body: input.body,
+        })),
+      );
 
-    const { error: recipientsError } = await this.db.from("outbound_batch_recipients").insert(
-      input.recipients.map((identity) => ({
-        batch_id: batch.id,
-        tenant_id: input.tenantId,
-        channel: input.channel,
-        identity_contact: identity,
-        body: input.body,
-      })),
-    );
-
-    if (recipientsError) throw recipientsError;
-    return batch;
+      return batch;
+    });
   }
 
+  /** Unscoped by tenant on purpose: the outbound-batch worker drains every
+   * tenant's batches and has already established which recipient row it is
+   * acting on. Reside-facing reads go through getOutboundBatchDetail, which
+   * does check. */
   async getOutboundBatch(batchId: string): Promise<OutboundBatch | null> {
-    const { data, error } = await this.db
-      .from("outbound_batches")
-      .select("*")
-      .eq("id", batchId)
-      .maybeSingle();
+    const [batch] = await this.orm
+      .select()
+      .from(outboundBatches)
+      .where(eq(outboundBatches.id, batchId))
+      .limit(1);
 
-    if (error) throw error;
-    return data;
+    return batch ?? null;
   }
 
   async listOutboundBatchRecipients(batchId: string): Promise<OutboundBatchRecipient[]> {
-    const { data, error } = await this.db
-      .from("outbound_batch_recipients")
-      .select("*")
-      .eq("batch_id", batchId)
-      .order("created_at", { ascending: true });
-
-    if (error) throw error;
-    return data ?? [];
+    return this.orm
+      .select()
+      .from(outboundBatchRecipients)
+      .where(eq(outboundBatchRecipients.batchId, batchId))
+      .orderBy(asc(outboundBatchRecipients.createdAt));
   }
 
   /**
@@ -794,86 +826,90 @@ export class DomainService {
    * that service is ever horizontally scaled).
    */
   async listPendingOutboundBatchRecipients(limit: number): Promise<OutboundBatchRecipient[]> {
-    const { data, error } = await this.db
-      .from("outbound_batch_recipients")
-      .select("*")
-      .eq("status", "pending")
-      .order("created_at", { ascending: true })
+    return this.orm
+      .select()
+      .from(outboundBatchRecipients)
+      .where(eq(outboundBatchRecipients.status, "pending"))
+      .orderBy(asc(outboundBatchRecipients.createdAt))
       .limit(limit);
-
-    if (error) throw error;
-    return data ?? [];
   }
 
   /** Atomically claims a recipient for one worker replica: pending -> sending.
    * Returns null when another replica got there first, which is the entire
    * double-send guard for bulk Notices. Mirrors claimScheduledMessage. */
   async claimOutboundBatchRecipient(recipientId: string): Promise<OutboundBatchRecipient | null> {
-    const { data, error } = await this.db
-      .from("outbound_batch_recipients")
-      .update({ status: "sending", claimed_at: new Date().toISOString() })
-      .eq("id", recipientId)
-      .eq("status", "pending")
-      .select("*")
-      .maybeSingle();
+    // The status predicate is the claim: two replicas issuing this at once,
+    // only one UPDATE matches a still-pending row and the other returns
+    // nothing. Losing it turns this into a double-send.
+    const [claimed] = await this.orm
+      .update(outboundBatchRecipients)
+      .set({ status: "sending", claimedAt: new Date() })
+      .where(
+        and(
+          eq(outboundBatchRecipients.id, recipientId),
+          eq(outboundBatchRecipients.status, "pending"),
+        ),
+      )
+      .returning();
 
-    if (error) throw error;
-    return data;
+    return claimed ?? null;
   }
 
   /** Returns claimed recipients whose replica died before resolving them, so a
    * later tick can put them back to pending. */
   async reclaimStuckOutboundBatchRecipients(olderThanIso: string): Promise<number> {
-    const { data, error } = await this.db
-      .from("outbound_batch_recipients")
-      .update({ status: "pending", claimed_at: null })
-      .eq("status", "sending")
-      .lt("claimed_at", olderThanIso)
-      .select("id");
+    const reclaimed = await this.orm
+      .update(outboundBatchRecipients)
+      .set({ status: "pending", claimedAt: null })
+      .where(
+        and(
+          eq(outboundBatchRecipients.status, "sending"),
+          lt(outboundBatchRecipients.claimedAt, new Date(olderThanIso)),
+        ),
+      )
+      .returning({ id: outboundBatchRecipients.id });
 
-    if (error) throw error;
-    return (data ?? []).length;
+    return reclaimed.length;
   }
 
   async updateOutboundBatchRecipientStatus(
     recipientId: string,
     patch: { status: "sent" | "failed"; messageId?: string; error?: string | null },
   ): Promise<void> {
-    const { error } = await this.db
-      .from("outbound_batch_recipients")
-      .update({
+    await this.orm
+      .update(outboundBatchRecipients)
+      .set({
         status: patch.status,
-        message_id: patch.messageId ?? null,
+        messageId: patch.messageId ?? null,
         error: patch.error ?? null,
       })
-      .eq("id", recipientId);
-
-    if (error) throw error;
+      .where(eq(outboundBatchRecipients.id, recipientId));
   }
 
   /** Called once per drained recipient; marks the batch completed once every
    * recipient has been processed. */
   async incrementOutboundBatchCompleted(batchId: string): Promise<void> {
-    const { data: batch, error: fetchError } = await this.db
-      .from("outbound_batches")
-      .select("completed_recipients, total_recipients")
-      .eq("id", batchId)
-      .single();
-    if (fetchError) throw fetchError;
-
-    const completed = batch.completed_recipients + 1;
-    const isDone = completed >= batch.total_recipients;
-
-    const { error } = await this.db
-      .from("outbound_batches")
-      .update({
-        completed_recipients: completed,
-        status: isDone ? "completed" : "processing",
-        completed_at: isDone ? new Date().toISOString() : null,
+    const [batch] = await this.orm
+      .select({
+        completedRecipients: outboundBatches.completedRecipients,
+        totalRecipients: outboundBatches.totalRecipients,
       })
-      .eq("id", batchId);
+      .from(outboundBatches)
+      .where(eq(outboundBatches.id, batchId))
+      .limit(1);
+    if (!batch) throw new Error(`Unknown outbound batch: ${batchId}`);
 
-    if (error) throw error;
+    const completed = batch.completedRecipients + 1;
+    const isDone = completed >= batch.totalRecipients;
+
+    await this.orm
+      .update(outboundBatches)
+      .set({
+        completedRecipients: completed,
+        status: isDone ? "completed" : "processing",
+        completedAt: isDone ? new Date() : null,
+      })
+      .where(eq(outboundBatches.id, batchId));
   }
 
   /** Composed read for reside's Notice detail page - batch + every recipient's
@@ -900,22 +936,24 @@ export class DomainService {
     >;
   } | null> {
     const batch = await this.getOutboundBatch(batchId);
-    if (!batch || batch.tenant_id !== tenantId) return null;
+    if (!batch || batch.tenantId !== tenantId) return null;
 
     const recipients = await this.listOutboundBatchRecipients(batchId);
-    const messageIds = recipients.map((r) => r.message_id).filter((id): id is string => Boolean(id));
+    const messageIds = recipients.map((r) => r.messageId).filter((id): id is string => Boolean(id));
 
     const messageMap = new Map<string, Message>();
     if (messageIds.length) {
-      const { data: messages, error } = await this.db.from("messages").select("*").in("id", messageIds);
-      if (error) throw error;
-      for (const m of messages ?? []) messageMap.set(m.id, m);
+      const rows = await this.orm
+        .select()
+        .from(messages)
+        .where(inArray(messages.id, messageIds));
+      for (const m of rows) messageMap.set(m.id, m as unknown as Message);
     }
 
     return {
       batch,
       recipients: recipients.map((r) => {
-        const message = r.message_id ? messageMap.get(r.message_id) : undefined;
+        const message = r.messageId ? messageMap.get(r.messageId) : undefined;
         return {
           ...r,
           deliveryStatus: message?.delivery_status ?? null,
