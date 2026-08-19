@@ -878,7 +878,18 @@ export class DomainService {
 
   /** Composed read for reside's Notice detail page - batch + every recipient's
    * current delivery status, joined from `messages` where dispatched. */
-  async getOutboundBatchDetail(batchId: string): Promise<{
+  /**
+   * A batch id is a bearer token if nothing checks who is asking, so this
+   * takes the tenant and returns null - indistinguishable from "no such
+   * batch" - when the batch belongs to someone else. Fetch-then-compare
+   * rather than a filtered query, matching how the rest of the reside-facing
+   * surface guards ownership (see member-conversation-guard).
+   *
+   * getOutboundBatch stays unscoped deliberately: its other caller is the
+   * outbound-batch worker, which drains every tenant's batches and has
+   * already established which recipient row it is acting on.
+   */
+  async getOutboundBatchDetail(batchId: string, tenantId: string): Promise<{
     batch: OutboundBatch;
     recipients: Array<
       OutboundBatchRecipient & {
@@ -889,7 +900,7 @@ export class DomainService {
     >;
   } | null> {
     const batch = await this.getOutboundBatch(batchId);
-    if (!batch) return null;
+    if (!batch || batch.tenant_id !== tenantId) return null;
 
     const recipients = await this.listOutboundBatchRecipients(batchId);
     const messageIds = recipients.map((r) => r.message_id).filter((id): id is string => Boolean(id));
