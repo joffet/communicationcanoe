@@ -46,7 +46,7 @@ export async function GET(request: Request) {
   // already-tenant-scoped page in memory instead of extending that query,
   // since admin inbox volumes here are small.
   if (assigneeUserId) {
-    conversations = conversations.filter((c) => c.assignees.some((a) => a.user_id === assigneeUserId));
+    conversations = conversations.filter((c) => c.assignees.some((a) => a.userId === assigneeUserId));
   }
   if (tagId) {
     conversations = conversations.filter((c) => c.tags.some((t) => t.id === tagId));
