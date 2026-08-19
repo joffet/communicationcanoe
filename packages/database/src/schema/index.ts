@@ -10,25 +10,28 @@
 //
 // NOT included here (see notes.md for why):
 //   - better-auth tables ("user", "session", "account", "verification") —
-//     created out-of-band by `better-auth migrate`, and (per
-//     packages/database/drizzle/0000_bootstrap_schema_and_role.sql) they live
-//     in the `public` schema on the shared cluster, not `comm_canoe` at all.
+//     created out-of-band by `better-auth migrate`. They live alongside these
+//     tables in this database's `public` schema, and are excluded from
+//     drizzle-kit's diff by tablesFilter in drizzle.config.ts.
 //   - RLS policies — inert under Better Auth (they all read auth.uid(), which
 //     Supabase Auth no longer supplies), and superseded by the schema-level
-//     isolation the bootstrap migration already sets up (comm-canoe and
-//     reside are separate Postgres schemas on one cluster; tenant isolation
-//     within comm_canoe is application-layer only, no RLS backstop). Full
+//     superseded by the isolation the bootstrap migration sets up (comm-canoe
+//     and reside are separate logical databases on one cluster, and neither
+//     role can CONNECT to the other's; tenant isolation *within* comm-canoe is
+//     application-layer only, with no RLS backstop). Full
 //     policy inventory is in notes.md so tenant-scoping behavior can be
 //     reimplemented in application code/tests.
 //   - get_user_tenant_ids() and the RLS-auto-enable event trigger — purely
 //     RLS-support plumbing with no application code path (see notes.md).
 //
-// Schema placement: every table/enum below lives in the `comm_canoe` Postgres
-// schema (see commCanoeSchema below), matching
-// packages/database/drizzle.config.ts's `schemaFilter: ["comm_canoe"]` and
-// the bootstrap migration. This is a real change from the source-of-truth
-// Supabase migrations, which created everything in `public` — there was no
-// multi-schema split under Supabase.
+// Schema placement: everything below lives in `public`, same as under
+// Supabase. Isolation from reside comes from being a separate logical
+// database on the shared cluster rather than a separate schema in a shared
+// one — PlanetScale's own pattern for multiple apps on one cluster, and the
+// stronger of the two: reside's role has no CONNECT privilege here at all,
+// rather than merely no GRANT on the tables. The tradeoff is that a
+// cross-product join is impossible rather than just ungranted, which suits
+// two products deliberately coupled only by reside's client uid.
 //
 // Naming convention: TS fields are camelCase; every column is given an
 // EXPLICIT snake_case db name (rather than relying on drizzle's
@@ -39,7 +42,8 @@
 
 import { sql } from "drizzle-orm";
 import {
-  pgSchema,
+  pgTable,
+  pgEnum,
   uuid,
   text,
   timestamp,
@@ -60,7 +64,6 @@ import {
  * packages/database/drizzle/0000_bootstrap_schema_and_role.sql). reside owns
  * a sibling `reside` schema; there is deliberately no cross-schema FK.
  */
-export const commCanoeSchema = pgSchema("comm_canoe");
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -72,7 +75,7 @@ export const commCanoeSchema = pgSchema("comm_canoe");
 // ---------------------------------------------------------------------------
 
 /** 20250620160000 (created) + 20250701001200 (added 'merged') */
-export const conversationStatusEnum = commCanoeSchema.enum("conversation_status", [
+export const conversationStatusEnum = pgEnum("conversation_status", [
   "open",
   "pending",
   "resolved",
@@ -80,32 +83,32 @@ export const conversationStatusEnum = commCanoeSchema.enum("conversation_status"
 ]);
 
 /** 20250620160000 (created) + 20250621140000 (added 'web_chat') */
-export const messageChannelEnum = commCanoeSchema.enum("message_channel", [
+export const messageChannelEnum = pgEnum("message_channel", [
   "voice",
   "sms",
   "email",
   "web_chat",
 ]);
 
-export const messageDirectionEnum = commCanoeSchema.enum("message_direction", [
+export const messageDirectionEnum = pgEnum("message_direction", [
   "inbound",
   "outbound",
 ]);
 
 /** 20250620160000 (created) + 20250625090000 (added 'system') */
-export const senderTypeEnum = commCanoeSchema.enum("sender_type", [
+export const senderTypeEnum = pgEnum("sender_type", [
   "external",
   "internal_user",
   "ai_agent",
   "system",
 ]);
 
-export const mergeMatchedOnEnum = commCanoeSchema.enum("merge_matched_on", [
+export const mergeMatchedOnEnum = pgEnum("merge_matched_on", [
   "phone",
   "email",
 ]);
 
-export const mergeActorEnum = commCanoeSchema.enum("merge_actor", ["system", "user"]);
+export const mergeActorEnum = pgEnum("merge_actor", ["system", "user"]);
 
 /**
  * 20250620160000: created as `call_transfer_outcome` ('answered',
@@ -115,25 +118,25 @@ export const mergeActorEnum = commCanoeSchema.enum("merge_actor", ["system", "us
  * The underlying pg_type is live_transfer_outcome — that's the only name
  * that exists in the final DB, so that's what's emitted here.
  */
-export const liveTransferOutcomeEnum = commCanoeSchema.enum("live_transfer_outcome", [
+export const liveTransferOutcomeEnum = pgEnum("live_transfer_outcome", [
   "answered",
   "no_answer",
   "declined",
   "pending",
 ]);
 
-export const tenantRoleEnum = commCanoeSchema.enum("tenant_role", ["admin", "member"]);
+export const tenantRoleEnum = pgEnum("tenant_role", ["admin", "member"]);
 
-export const teamRoleEnum = commCanoeSchema.enum("team_role", ["lead", "member"]);
+export const teamRoleEnum = pgEnum("team_role", ["lead", "member"]);
 
 /** 20250621130000 */
-export const platformRoleEnum = commCanoeSchema.enum("platform_role", [
+export const platformRoleEnum = pgEnum("platform_role", [
   "user",
   "super_admin",
 ]);
 
 /** 20250621140000 */
-export const liveTransferChannelEnum = commCanoeSchema.enum("live_transfer_channel", [
+export const liveTransferChannelEnum = pgEnum("live_transfer_channel", [
   "voice",
   "web_chat",
 ]);
@@ -141,7 +144,7 @@ export const liveTransferChannelEnum = commCanoeSchema.enum("live_transfer_chann
 /**
  * 20250625100000 (created) + 20250701000800 (added 'sending', 'canceled')
  */
-export const messageDeliveryStatusEnum = commCanoeSchema.enum("message_delivery_status", [
+export const messageDeliveryStatusEnum = pgEnum("message_delivery_status", [
   "queued",
   "sent",
   "delivered",
@@ -152,13 +155,13 @@ export const messageDeliveryStatusEnum = commCanoeSchema.enum("message_delivery_
 ]);
 
 /** 20250701000500 */
-export const messageVisibilityEnum = commCanoeSchema.enum("message_visibility", [
+export const messageVisibilityEnum = pgEnum("message_visibility", [
   "internal",
   "external",
 ]);
 
 /** 20250701000700 */
-export const conversationPriorityEnum = commCanoeSchema.enum("conversation_priority", [
+export const conversationPriorityEnum = pgEnum("conversation_priority", [
   "low",
   "normal",
   "high",
@@ -169,7 +172,7 @@ export const conversationPriorityEnum = commCanoeSchema.enum("conversation_prior
 // Tenants
 // ---------------------------------------------------------------------------
 
-export const tenants = commCanoeSchema.table(
+export const tenants = pgTable(
   "tenants",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -224,7 +227,7 @@ export const tenants = commCanoeSchema.table(
 // Tenant settings
 // ---------------------------------------------------------------------------
 
-export const tenantSettings = commCanoeSchema.table("tenant_settings", {
+export const tenantSettings = pgTable("tenant_settings", {
   tenantId: uuid("tenant_id")
     .primaryKey()
     .references(() => tenants.id, { onDelete: "cascade" }),
@@ -260,7 +263,7 @@ export const tenantSettings = commCanoeSchema.table("tenant_settings", {
 // Users (app-domain profile; identity/sessions owned by Better Auth)
 // ---------------------------------------------------------------------------
 
-export const users = commCanoeSchema.table(
+export const users = pgTable(
   "users",
   {
     /**
@@ -297,7 +300,7 @@ export const users = commCanoeSchema.table(
 // User <-> tenant membership
 // ---------------------------------------------------------------------------
 
-export const userTenantMemberships = commCanoeSchema.table(
+export const userTenantMemberships = pgTable(
   "user_tenant_memberships",
   {
     userId: uuid("user_id")
@@ -321,7 +324,7 @@ export const userTenantMemberships = commCanoeSchema.table(
 // Teams
 // ---------------------------------------------------------------------------
 
-export const teams = commCanoeSchema.table(
+export const teams = pgTable(
   "teams",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -343,7 +346,7 @@ export const teams = commCanoeSchema.table(
 // Team membership
 // ---------------------------------------------------------------------------
 
-export const teamMemberships = commCanoeSchema.table(
+export const teamMemberships = pgTable(
   "team_memberships",
   {
     userId: uuid("user_id")
@@ -365,7 +368,7 @@ export const teamMemberships = commCanoeSchema.table(
 // Identities (customers)
 // ---------------------------------------------------------------------------
 
-export const identities = commCanoeSchema.table(
+export const identities = pgTable(
   "identities",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -428,7 +431,7 @@ export const identities = commCanoeSchema.table(
 // Identity merge audit log
 // ---------------------------------------------------------------------------
 
-export const identityMergeLogs = commCanoeSchema.table(
+export const identityMergeLogs = pgTable(
   "identity_merge_logs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -459,7 +462,7 @@ export const identityMergeLogs = commCanoeSchema.table(
 // ---------------------------------------------------------------------------
 
 /** 20250621140000 */
-export const identityConversionLogs = commCanoeSchema.table(
+export const identityConversionLogs = pgTable(
   "identity_conversion_logs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -491,7 +494,7 @@ export const identityConversionLogs = commCanoeSchema.table(
 // Conversations
 // ---------------------------------------------------------------------------
 
-export const conversations = commCanoeSchema.table(
+export const conversations = pgTable(
   "conversations",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -559,7 +562,7 @@ export const conversations = commCanoeSchema.table(
 // Messages
 // ---------------------------------------------------------------------------
 
-export const messages = commCanoeSchema.table(
+export const messages = pgTable(
   "messages",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -646,7 +649,7 @@ export const messages = commCanoeSchema.table(
 // Live transfers (renamed from call_transfers in 20250621140000)
 // ---------------------------------------------------------------------------
 
-export const liveTransfers = commCanoeSchema.table(
+export const liveTransfers = pgTable(
   "live_transfers",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -688,7 +691,7 @@ export const liveTransfers = commCanoeSchema.table(
 // Outbound batches (bulk-send queue, reside "Notices" integration)
 // ---------------------------------------------------------------------------
 
-export const outboundBatches = commCanoeSchema.table("outbound_batches", {
+export const outboundBatches = pgTable("outbound_batches", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: uuid("tenant_id")
     .notNull()
@@ -711,7 +714,7 @@ export const outboundBatches = commCanoeSchema.table("outbound_batches", {
   ),
 ]);
 
-export const outboundBatchRecipients = commCanoeSchema.table(
+export const outboundBatchRecipients = pgTable(
   "outbound_batch_recipients",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -759,7 +762,7 @@ export const outboundBatchRecipients = commCanoeSchema.table(
 // Tags (Admin Inbox, Phase 2)
 // ---------------------------------------------------------------------------
 
-export const tags = commCanoeSchema.table(
+export const tags = pgTable(
   "tags",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -781,7 +784,7 @@ export const tags = commCanoeSchema.table(
   ],
 );
 
-export const conversationTags = commCanoeSchema.table(
+export const conversationTags = pgTable(
   "conversation_tags",
   {
     conversationId: uuid("conversation_id")
@@ -804,7 +807,7 @@ export const conversationTags = commCanoeSchema.table(
 // Conversation assignees (multi-assignee support, Admin Inbox Phase 2)
 // ---------------------------------------------------------------------------
 
-export const conversationAssignees = commCanoeSchema.table(
+export const conversationAssignees = pgTable(
   "conversation_assignees",
   {
     conversationId: uuid("conversation_id")
@@ -830,7 +833,7 @@ export const conversationAssignees = commCanoeSchema.table(
 // Conversation participants (multi-participant support, Admin Inbox Phase 2)
 // ---------------------------------------------------------------------------
 
-export const conversationParticipants = commCanoeSchema.table(
+export const conversationParticipants = pgTable(
   "conversation_participants",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -868,7 +871,7 @@ export const conversationParticipants = commCanoeSchema.table(
 // Conversation splits (Admin Inbox, Phase 8)
 // ---------------------------------------------------------------------------
 
-export const conversationSplits = commCanoeSchema.table(
+export const conversationSplits = pgTable(
   "conversation_splits",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -908,7 +911,7 @@ export const conversationSplits = commCanoeSchema.table(
 // Conversation read states (per-user read tracking, reside dashboard)
 // ---------------------------------------------------------------------------
 
-export const conversationReadStates = commCanoeSchema.table(
+export const conversationReadStates = pgTable(
   "conversation_read_states",
   {
     conversationId: uuid("conversation_id")
@@ -935,7 +938,7 @@ export const conversationReadStates = commCanoeSchema.table(
 // Conversation personal tags (per-admin "relevant to me" marker)
 // ---------------------------------------------------------------------------
 
-export const conversationPersonalTags = commCanoeSchema.table(
+export const conversationPersonalTags = pgTable(
   "conversation_personal_tags",
   {
     conversationId: uuid("conversation_id")
@@ -958,7 +961,7 @@ export const conversationPersonalTags = commCanoeSchema.table(
 // RAG: documents + chunks (Phase 10)
 // ---------------------------------------------------------------------------
 
-export const documents = commCanoeSchema.table(
+export const documents = pgTable(
   "documents",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -1018,7 +1021,7 @@ export const documents = commCanoeSchema.table(
  * vector(1536)` will fail to resolve the type name at migration-apply time.
  * See notes.md.
  */
-export const documentChunks = commCanoeSchema.table(
+export const documentChunks = pgTable(
   "document_chunks",
   {
     id: uuid("id").primaryKey().defaultRandom(),
