@@ -46,9 +46,9 @@ async function notifyOverdueConversations(): Promise<void> {
       const thread = await domain.getConversationThread(claimed.id);
       const who = thread?.identity.name ?? thread?.identity.email ?? thread?.identity.phone ?? "a resident";
 
-      // claimed.tenant_id is comm-canoe's internal uuid - reside matches on its
+      // claimed.tenantId is comm-canoe's internal uuid - reside matches on its
       // own client uid, so translate before notifying.
-      const tenant = await admin.getTenantById(claimed.tenant_id);
+      const tenant = await admin.getTenantById(claimed.tenantId);
       if (!tenant) continue;
 
       await notifyResideResponseOverdue({

@@ -29,7 +29,7 @@ export default async function InboxPage({
   let thread = null;
   if (selectedId) {
     thread = await domain.getConversationThread(selectedId);
-    if (thread && thread.tenant_id !== tenantId) {
+    if (thread && thread.tenantId !== tenantId) {
       redirect("/inbox");
     }
   }

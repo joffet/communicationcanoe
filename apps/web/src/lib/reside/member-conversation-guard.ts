@@ -42,11 +42,11 @@ export async function findResidentIdentity(
  * phone/email match rather than a stable session-issued id.
  */
 export async function verifyConversationOwnership(
-  conversation: { identity_id: string },
+  conversation: { identityId: string },
   identityId: string,
 ): Promise<boolean> {
   const chainIds = await createDomainService().getIdentityMergeChainIds(identityId);
-  return chainIds.includes(conversation.identity_id);
+  return chainIds.includes(conversation.identityId);
 }
 
 /** Trims a full (staff-shaped) ConversationThread down to what a resident
@@ -66,8 +66,8 @@ export function toMemberSafeThread(conversation: ConversationThread): MemberConv
     // "merged" as a conversation state) without weakening it to admit the
     // value TypeScript otherwise proves is possible.
     status: conversation.status === "merged" ? "resolved" : conversation.status,
-    created_at: conversation.created_at,
-    last_message_at: conversation.last_message_at,
+    created_at: conversation.createdAt.toISOString(),
+    last_message_at: conversation.lastMessageAt.toISOString(),
     messages: conversation.messages
       .filter((m) => m.visibility === "external")
       .map((m) => ({
@@ -108,7 +108,7 @@ export async function resolveOwnedConversation(
   if (!tenant) return { ok: false, status: 404 };
 
   const conversation = await domain.getConversationThread(conversationId);
-  if (!conversation || conversation.tenant_id !== tenant.id) {
+  if (!conversation || conversation.tenantId !== tenant.id) {
     return { ok: false, status: 404 };
   }
 

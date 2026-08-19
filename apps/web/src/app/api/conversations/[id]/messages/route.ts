@@ -14,7 +14,7 @@ export async function POST(
   if (!text) return new Response("Missing text", { status: 400 });
 
   const message = await access.domain.appendMessage({
-    tenantId: access.thread.tenant_id,
+    tenantId: access.thread.tenantId,
     conversationId: id,
     channel: "web_chat",
     direction: "outbound",

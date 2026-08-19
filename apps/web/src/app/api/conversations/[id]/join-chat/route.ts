@@ -16,7 +16,7 @@ export async function POST(
 
   const ok = await notifyBridgeHandoffJoin({
     conversationId: id,
-    tenantId: access.thread.tenant_id,
+    tenantId: access.thread.tenantId,
     agentUserId: access.session.user.id,
     agentName: access.session.user.name ?? undefined,
   });

@@ -33,7 +33,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const identity = await domain.findOrCreateIdentity(tenantId, contact);
 
   const conversation = await domain.getConversationThread(id);
-  if (!conversation || conversation.tenant_id !== tenantId) {
+  if (!conversation || conversation.tenantId !== tenantId) {
     return new Response("Unknown conversation", { status: 404 });
   }
   const owned = await verifyConversationOwnership(conversation, identity.id);

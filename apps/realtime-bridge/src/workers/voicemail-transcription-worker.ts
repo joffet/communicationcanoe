@@ -92,7 +92,7 @@ async function triggerConversationRouting(
   tenantId: string,
 ): Promise<void> {
   const thread = await domain.getConversationThread(conversationId);
-  if (!thread || thread.assigned_team_id) return;
+  if (!thread || thread.assignedTeamId) return;
 
   const teams = await domain.getTeamsForTenant(tenantId);
   const lastInbound = [...thread.messages].reverse().find((m) => m.direction === "inbound");

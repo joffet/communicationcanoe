@@ -67,7 +67,7 @@ export async function POST(request: Request) {
   let conversation;
   if (conversationId) {
     const thread = await domain.getConversationThread(conversationId);
-    if (!thread || thread.tenant_id !== tenantId || thread.identity_id !== resolvedIdentity.id) {
+    if (!thread || thread.tenantId !== tenantId || thread.identityId !== resolvedIdentity.id) {
       return Response.json({ error: "conversationId does not belong to this tenant/identity" }, { status: 400 });
     }
     conversation = thread;

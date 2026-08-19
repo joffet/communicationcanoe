@@ -1,4 +1,5 @@
 import {
+  conversations,
   identities,
   messages,
   conversationAssignees,
@@ -643,18 +644,13 @@ export type DocumentChunkInsert = {
 export type Tables<T extends keyof DatabaseTables> = DatabaseTables[T]["Row"];
 
 export type Tenant = TenantRow;
-/** Inferred from the Drizzle schema - camelCase - now that the identity
- * methods are converted. ConversationWithIdentity therefore carries a
- * camelCase `identity` beside snake_case conversation fields until the
- * conversation reads move too. Ugly and temporary, but coherent: the
- * alternative was converting both closures in one change. */
+/** Inferred from the Drizzle schema. */
 export type Identity = typeof identities.$inferSelect;
-export type Conversation = ConversationRow;
-/** Inferred from the Drizzle schema - camelCase. ConversationThread therefore
- * carries camelCase messages and identity beside snake_case conversation
- * fields until the conversation reads convert too; that seam is deliberate and
- * short-lived, and it is what let the message closure ship on its own rather
- * than as one 60-method change. */
+/** Inferred from the Drizzle schema. With this, ConversationWithIdentity and
+ * ConversationThread are uniformly camelCase - the mixed-casing seam that let
+ * messages and identities convert on their own is now closed. */
+export type Conversation = typeof conversations.$inferSelect;
+/** Inferred from the Drizzle schema. */
 export type Message = typeof messages.$inferSelect;
 export type Team = TeamRow;
 export type LiveTransfer = LiveTransferRow;

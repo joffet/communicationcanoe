@@ -19,12 +19,12 @@ export async function POST(request: Request) {
 
   const domain = createDomainService();
   const thread = await domain.getConversationThread(body.conversationId);
-  if (!thread || thread.tenant_id !== body.tenantId) {
+  if (!thread || thread.tenantId !== body.tenantId) {
     return new Response("Conversation not found", { status: 404 });
   }
 
-  if (thread.assigned_team_id) {
-    return Response.json({ teamId: thread.assigned_team_id, reasoning: "Already assigned" });
+  if (thread.assignedTeamId) {
+    return Response.json({ teamId: thread.assignedTeamId, reasoning: "Already assigned" });
   }
 
   const teams = await domain.getTeamsForTenant(body.tenantId);

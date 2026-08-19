@@ -4,7 +4,7 @@ import { routeConversation } from "@communication-canoe/shared/ai";
 export async function triggerConversationRouting(conversationId: string, tenantId: string) {
   const domain = createDomainService();
   const thread = await domain.getConversationThread(conversationId);
-  if (!thread || thread.assigned_team_id) return;
+  if (!thread || thread.assignedTeamId) return;
 
   const teams = await domain.getTeamsForTenant(tenantId);
   const lastInbound = [...thread.messages].reverse().find((m) => m.direction === "inbound");

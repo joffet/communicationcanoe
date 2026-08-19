@@ -32,7 +32,7 @@ export async function DELETE(
     // Only clear the single-column assigned_user_id if it currently matches
     // the removed user - don't clobber a different still-assigned admin
     // when a conversation has multiple assignees.
-    if (guard.conversation.assigned_user_id === targetUserId) {
+    if (guard.conversation.assignedUserId === targetUserId) {
       await domain.assignConversationUser(guard.conversation.id, null);
     }
   }
