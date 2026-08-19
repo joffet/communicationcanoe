@@ -1627,114 +1627,121 @@ export class DomainService {
    * user, so both sides are read first and the newer last_read_at per user
    * wins - unread status must never regress across a merge. */
   private async moveConversationExtras(sourceId: string, targetId: string): Promise<void> {
-    const [
-      tagsRes,
-      assigneesRes,
-      sourceParticipantsRes,
-      targetParticipantsRes,
-      personalTagsRes,
-      sourceReadStatesRes,
-      targetReadStatesRes,
-    ] = await Promise.all([
-      this.db.from("conversation_tags").select("tag_id").eq("conversation_id", sourceId),
-      this.db.from("conversation_assignees").select("user_id, assigned_by").eq("conversation_id", sourceId),
-      this.db.from("conversation_participants").select("identity_id, user_id, role").eq("conversation_id", sourceId),
-      this.db.from("conversation_participants").select("identity_id, user_id").eq("conversation_id", targetId),
-      this.db.from("conversation_personal_tags").select("user_id").eq("conversation_id", sourceId),
-      this.db
-        .from("conversation_read_states")
-        .select("user_id, last_read_at, last_read_message_id")
-        .eq("conversation_id", sourceId),
-      this.db
-        .from("conversation_read_states")
-        .select("user_id, last_read_at, last_read_message_id")
-        .eq("conversation_id", targetId),
-    ]);
-    if (tagsRes.error) throw tagsRes.error;
-    if (assigneesRes.error) throw assigneesRes.error;
-    if (sourceParticipantsRes.error) throw sourceParticipantsRes.error;
-    if (targetParticipantsRes.error) throw targetParticipantsRes.error;
-    if (personalTagsRes.error) throw personalTagsRes.error;
-    if (sourceReadStatesRes.error) throw sourceReadStatesRes.error;
-    if (targetReadStatesRes.error) throw targetReadStatesRes.error;
+    // One transaction. These five writes were five independent round trips,
+    // and a failure partway left a merged conversation with some of its
+    // extras moved and the rest still on a source that callers treat as gone.
+    await this.orm.transaction(async (tx) => {
+      const [
+        sourceTags,
+        sourceAssignees,
+        sourceParticipants,
+        targetParticipants,
+        sourcePersonalTags,
+        sourceReadStates,
+        targetReadStates,
+      ] = await Promise.all([
+        tx.select({ tagId: conversationTags.tagId }).from(conversationTags)
+          .where(eq(conversationTags.conversationId, sourceId)),
+        tx.select({ userId: conversationAssignees.userId, assignedBy: conversationAssignees.assignedBy })
+          .from(conversationAssignees).where(eq(conversationAssignees.conversationId, sourceId)),
+        tx.select({
+          identityId: conversationParticipants.identityId,
+          userId: conversationParticipants.userId,
+          role: conversationParticipants.role,
+        }).from(conversationParticipants).where(eq(conversationParticipants.conversationId, sourceId)),
+        tx.select({
+          identityId: conversationParticipants.identityId,
+          userId: conversationParticipants.userId,
+        }).from(conversationParticipants).where(eq(conversationParticipants.conversationId, targetId)),
+        tx.select({ userId: conversationPersonalTags.userId }).from(conversationPersonalTags)
+          .where(eq(conversationPersonalTags.conversationId, sourceId)),
+        tx.select().from(conversationReadStates)
+          .where(eq(conversationReadStates.conversationId, sourceId)),
+        tx.select().from(conversationReadStates)
+          .where(eq(conversationReadStates.conversationId, targetId)),
+      ]);
 
-    const tagRows = (tagsRes.data ?? []).map((t) => ({ conversation_id: targetId, tag_id: t.tag_id as string }));
-    const assigneeRows = (assigneesRes.data ?? []).map((a) => ({
-      conversation_id: targetId,
-      user_id: a.user_id as string,
-      assigned_by: a.assigned_by as string | null,
-    }));
-    const personalTagRows = (personalTagsRes.data ?? []).map((t) => ({
-      conversation_id: targetId,
-      user_id: t.user_id as string,
-    }));
+      // A participant is the same person whether they arrived as an identity
+      // or a user, so dedup on both - inserting a duplicate would show one
+      // person twice on the merged thread.
+      const participantKey = (p: { identityId: string | null; userId: string | null }) =>
+        `${p.identityId ?? ""}:${p.userId ?? ""}`;
+      const existingParticipantKeys = new Set(targetParticipants.map(participantKey));
+      const participantRows = sourceParticipants
+        .filter((p) => !existingParticipantKeys.has(participantKey(p)))
+        .map((p) => ({
+          conversationId: targetId,
+          identityId: p.identityId,
+          userId: p.userId,
+          role: p.role,
+        }));
 
-    const existingParticipantKeys = new Set(
-      (targetParticipantsRes.data ?? []).map((p) => `${p.identity_id ?? ""}:${p.user_id ?? ""}`),
-    );
-    const participantRows = (sourceParticipantsRes.data ?? [])
-      .filter((p) => !existingParticipantKeys.has(`${p.identity_id ?? ""}:${p.user_id ?? ""}`))
-      .map((p) => ({
-        conversation_id: targetId,
-        identity_id: p.identity_id as string | null,
-        user_id: p.user_id as string | null,
-        role: p.role as "external" | "internal",
-      }));
-
-    const readStateByUser = new Map<string, { last_read_at: string; last_read_message_id: string | null }>();
-    for (const row of [...(targetReadStatesRes.data ?? []), ...(sourceReadStatesRes.data ?? [])]) {
-      const userId = row.user_id as string;
-      const existing = readStateByUser.get(userId);
-      if (!existing || new Date(row.last_read_at as string) > new Date(existing.last_read_at)) {
-        readStateByUser.set(userId, {
-          last_read_at: row.last_read_at as string,
-          last_read_message_id: row.last_read_message_id as string | null,
-        });
+      // Target first, then source, keeping whichever cursor is later: a viewer
+      // who had read further in one conversation must not be told the merged
+      // thread is unread because the other side lagged.
+      const readStateByUser = new Map<string, { lastReadAt: Date; lastReadMessageId: string | null }>();
+      for (const row of [...targetReadStates, ...sourceReadStates]) {
+        const existing = readStateByUser.get(row.userId);
+        if (!existing || row.lastReadAt > existing.lastReadAt) {
+          readStateByUser.set(row.userId, {
+            lastReadAt: row.lastReadAt,
+            lastReadMessageId: row.lastReadMessageId,
+          });
+        }
       }
-    }
-    const readStateRows = [...readStateByUser.entries()].map(([userId, state]) => ({
-      conversation_id: targetId,
-      user_id: userId,
-      ...state,
-    }));
 
-    const [tagWrite, assigneeWrite, participantWrite, personalTagWrite, readStateWrite] = await Promise.all([
-      tagRows.length
-        ? this.db.from("conversation_tags").upsert(tagRows, { onConflict: "conversation_id,tag_id" })
-        : { error: null },
-      assigneeRows.length
-        ? this.db.from("conversation_assignees").upsert(assigneeRows, { onConflict: "conversation_id,user_id" })
-        : { error: null },
-      participantRows.length
-        ? this.db.from("conversation_participants").insert(participantRows)
-        : { error: null },
-      personalTagRows.length
-        ? this.db
-            .from("conversation_personal_tags")
-            .upsert(personalTagRows, { onConflict: "conversation_id,user_id" })
-        : { error: null },
-      readStateRows.length
-        ? this.db.from("conversation_read_states").upsert(readStateRows, { onConflict: "conversation_id,user_id" })
-        : { error: null },
-    ]);
-    if (tagWrite.error) throw tagWrite.error;
-    if (assigneeWrite.error) throw assigneeWrite.error;
-    if (participantWrite.error) throw participantWrite.error;
-    if (personalTagWrite.error) throw personalTagWrite.error;
-    if (readStateWrite.error) throw readStateWrite.error;
+      if (sourceTags.length) {
+        await tx.insert(conversationTags)
+          .values(sourceTags.map((t) => ({ conversationId: targetId, tagId: t.tagId })))
+          .onConflictDoNothing();
+      }
 
-    const [delTags, delAssignees, delParticipants, delPersonalTags, delReadStates] = await Promise.all([
-      this.db.from("conversation_tags").delete().eq("conversation_id", sourceId),
-      this.db.from("conversation_assignees").delete().eq("conversation_id", sourceId),
-      this.db.from("conversation_participants").delete().eq("conversation_id", sourceId),
-      this.db.from("conversation_personal_tags").delete().eq("conversation_id", sourceId),
-      this.db.from("conversation_read_states").delete().eq("conversation_id", sourceId),
-    ]);
-    if (delTags.error) throw delTags.error;
-    if (delAssignees.error) throw delAssignees.error;
-    if (delParticipants.error) throw delParticipants.error;
-    if (delPersonalTags.error) throw delPersonalTags.error;
-    if (delReadStates.error) throw delReadStates.error;
+      if (sourceAssignees.length) {
+        await tx.insert(conversationAssignees)
+          .values(sourceAssignees.map((a) => ({
+            conversationId: targetId, userId: a.userId, assignedBy: a.assignedBy,
+          })))
+          .onConflictDoUpdate({
+            target: [conversationAssignees.conversationId, conversationAssignees.userId],
+            set: { assignedBy: sql`excluded.assigned_by` },
+          });
+      }
+
+      if (participantRows.length) {
+        await tx.insert(conversationParticipants).values(participantRows);
+      }
+
+      if (sourcePersonalTags.length) {
+        await tx.insert(conversationPersonalTags)
+          .values(sourcePersonalTags.map((t) => ({ conversationId: targetId, userId: t.userId })))
+          .onConflictDoNothing();
+      }
+
+      if (readStateByUser.size) {
+        await tx.insert(conversationReadStates)
+          .values([...readStateByUser.entries()].map(([userId, state]) => ({
+            conversationId: targetId, userId, ...state,
+          })))
+          .onConflictDoUpdate({
+            target: [conversationReadStates.conversationId, conversationReadStates.userId],
+            set: {
+              lastReadAt: sql`excluded.last_read_at`,
+              lastReadMessageId: sql`excluded.last_read_message_id`,
+            },
+          });
+      }
+      // Inside the transaction with the copy, not after it. This is a move:
+      // copy-then-delete as two units of work leaves the same rows on both
+      // conversations if the second half fails, and a merged source is one
+      // callers treat as gone - nothing would go back to reconcile it.
+      await Promise.all([
+        tx.delete(conversationTags).where(eq(conversationTags.conversationId, sourceId)),
+        tx.delete(conversationAssignees).where(eq(conversationAssignees.conversationId, sourceId)),
+        tx.delete(conversationParticipants).where(eq(conversationParticipants.conversationId, sourceId)),
+        tx.delete(conversationPersonalTags).where(eq(conversationPersonalTags.conversationId, sourceId)),
+        tx.delete(conversationReadStates).where(eq(conversationReadStates.conversationId, sourceId)),
+      ]);
+    });
   }
 
   /** Signals comm-canoe's own dashboard (apps/web/src/components/inbox/

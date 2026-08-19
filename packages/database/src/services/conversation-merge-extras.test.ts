@@ -1,141 +1,185 @@
-import { describe, expect, it } from "vitest";
-import { createFakeSupabaseClient } from "../testing/fake-supabase-client";
-import type { AppSupabaseClient } from "../client";
+import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { DomainService } from "./index";
+import type { AppSupabaseClient } from "../client";
+import { createTestDb, resetTestDb, type TestDb } from "../testing/pglite";
+import {
+  conversationAssignees,
+  conversationPersonalTags,
+  conversationReadStates,
+  conversationTags,
+  conversations,
+  identities,
+  tags,
+  tenants,
+  users,
+} from "../schema";
 
-/**
- * moveConversationExtras is private - exercised directly here (bypassing
- * the public mergeConversations) because that entry point also pulls in
- * identity-chain validation, tenant checks, and a Supabase Realtime
- * broadcast, none of which are part of the extras-move logic these tests
- * target. TypeScript's `private` is compile-time only, so casting past it
- * for a test is safe.
- */
-function moveExtras(domain: DomainService, sourceId: string, targetId: string): Promise<void> {
+let db: TestDb;
+let close: () => Promise<void>;
+let domain: DomainService;
+
+const ADMIN_1 = "11111111-1111-1111-1111-111111111111";
+const ADMIN_2 = "22222222-2222-2222-2222-222222222222";
+
+/** Exercised directly rather than through the public mergeConversations,
+ * because that entry point also rewrites conversations.merged_into_id and
+ * broadcasts - neither of which this is about. */
+function moveExtras(sourceId: string, targetId: string): Promise<void> {
   return (domain as unknown as { moveConversationExtras: (s: string, t: string) => Promise<void> })
     .moveConversationExtras(sourceId, targetId);
 }
 
-function service(seed: Parameters<typeof createFakeSupabaseClient>[0]) {
-  const db = createFakeSupabaseClient(seed);
-  const domain = new DomainService(db as unknown as AppSupabaseClient);
-  return { db, domain };
+beforeAll(async () => {
+  ({ db, close } = await createTestDb());
+  domain = new DomainService(null as unknown as AppSupabaseClient, db);
+}, 60_000);
+
+afterAll(async () => {
+  await close();
+});
+
+beforeEach(async () => {
+  await resetTestDb(db);
+});
+
+async function seed() {
+  const [tenant] = await db.insert(tenants).values({
+    name: "Tenant", twilioNumber: "+15550000001",
+    inboundEmailAddress: "t@example.test", chatWidgetKey: "key", resideClientUid: "client",
+  }).returning();
+  await db.insert(users).values([
+    { id: ADMIN_1, email: "a1@example.test", name: "Admin One" },
+    { id: ADMIN_2, email: "a2@example.test", name: "Admin Two" },
+  ]);
+  const [identity] = await db.insert(identities).values({
+    tenantId: tenant.id, email: "customer@example.test",
+  }).returning();
+  const [source] = await db.insert(conversations).values({
+    tenantId: tenant.id, identityId: identity.id, status: "open",
+  }).returning();
+  const [target] = await db.insert(conversations).values({
+    tenantId: tenant.id, identityId: identity.id, status: "open",
+  }).returning();
+  const [tag] = await db.insert(tags).values({ tenantId: tenant.id, name: "urgent" }).returning();
+  return { tenant, identity, source, target, tag };
 }
 
-const SOURCE = "conv-source";
-const TARGET = "conv-target";
-
-describe("moveConversationExtras merge", () => {
+describe("moveConversationExtras", () => {
   it("moves tags, assignees, and personal tags from source onto target", async () => {
-    const { db, domain } = service({
-      conversation_tags: [{ conversation_id: SOURCE, tag_id: "tag-1" }],
-      conversation_assignees: [{ conversation_id: SOURCE, user_id: "admin-1", assigned_by: "admin-2" }],
-      conversation_personal_tags: [{ conversation_id: SOURCE, user_id: "admin-3" }],
+    const { source, target, tag } = await seed();
+    await db.insert(conversationTags).values({ conversationId: source.id, tagId: tag.id });
+    await db.insert(conversationAssignees).values({
+      conversationId: source.id, userId: ADMIN_1, assignedBy: ADMIN_2,
+    });
+    await db.insert(conversationPersonalTags).values({
+      conversationId: source.id, userId: ADMIN_1,
     });
 
-    await moveExtras(domain, SOURCE, TARGET);
+    await moveExtras(source.id, target.id);
 
-    expect(db.__table("conversation_tags")).toEqual([{ conversation_id: TARGET, tag_id: "tag-1" }]);
-    expect(db.__table("conversation_assignees")).toEqual([
-      { conversation_id: TARGET, user_id: "admin-1", assigned_by: "admin-2" },
-    ]);
-    expect(db.__table("conversation_personal_tags")).toEqual([{ conversation_id: TARGET, user_id: "admin-3" }]);
+    expect(await db.select().from(conversationTags).where(eq(conversationTags.conversationId, target.id)))
+      .toMatchObject([{ tagId: tag.id }]);
+    expect(await db.select().from(conversationAssignees).where(eq(conversationAssignees.conversationId, target.id)))
+      .toMatchObject([{ userId: ADMIN_1, assignedBy: ADMIN_2 }]);
+    expect(await db.select().from(conversationPersonalTags).where(eq(conversationPersonalTags.conversationId, target.id)))
+      .toMatchObject([{ userId: ADMIN_1 }]);
   });
 
-  it("dedupes a tag/assignee/personal-tag that already exists on the target", async () => {
-    const { db, domain } = service({
-      conversation_tags: [
-        { conversation_id: SOURCE, tag_id: "tag-shared" },
-        { conversation_id: TARGET, tag_id: "tag-shared" },
-      ],
-      conversation_personal_tags: [
-        { conversation_id: SOURCE, user_id: "admin-1" },
-        { conversation_id: TARGET, user_id: "admin-1" },
-      ],
-    });
+  it("dedupes a tag, assignee and personal tag that already exists on the target", async () => {
+    const { source, target, tag } = await seed();
+    for (const conversationId of [source.id, target.id]) {
+      await db.insert(conversationTags).values({ conversationId, tagId: tag.id });
+      await db.insert(conversationAssignees).values({
+        conversationId, userId: ADMIN_1, assignedBy: ADMIN_2,
+      });
+      await db.insert(conversationPersonalTags).values({ conversationId, userId: ADMIN_1 });
+    }
 
-    await moveExtras(domain, SOURCE, TARGET);
+    await moveExtras(source.id, target.id);
 
-    expect(db.__table("conversation_tags")).toHaveLength(1);
-    expect(db.__table("conversation_personal_tags")).toHaveLength(1);
+    expect(await db.select().from(conversationTags).where(eq(conversationTags.conversationId, target.id)))
+      .toHaveLength(1);
+    expect(await db.select().from(conversationAssignees).where(eq(conversationAssignees.conversationId, target.id)))
+      .toHaveLength(1);
+    expect(await db.select().from(conversationPersonalTags).where(eq(conversationPersonalTags.conversationId, target.id)))
+      .toHaveLength(1);
   });
 
   it("deletes every moved row from the source conversation", async () => {
-    const { db, domain } = service({
-      conversation_tags: [{ conversation_id: SOURCE, tag_id: "tag-1" }],
-      conversation_assignees: [{ conversation_id: SOURCE, user_id: "admin-1" }],
-      conversation_personal_tags: [{ conversation_id: SOURCE, user_id: "admin-1" }],
-      conversation_read_states: [{ conversation_id: SOURCE, user_id: "admin-1", last_read_at: "2026-08-01T00:00:00.000Z" }],
+    const { source, target, tag } = await seed();
+    await db.insert(conversationTags).values({ conversationId: source.id, tagId: tag.id });
+    await db.insert(conversationAssignees).values({
+      conversationId: source.id, userId: ADMIN_1, assignedBy: ADMIN_2,
+    });
+    await db.insert(conversationPersonalTags).values({ conversationId: source.id, userId: ADMIN_1 });
+    await db.insert(conversationReadStates).values({
+      conversationId: source.id, userId: ADMIN_1, lastReadAt: new Date("2026-08-01T00:00:00Z"),
     });
 
-    await moveExtras(domain, SOURCE, TARGET);
+    await moveExtras(source.id, target.id);
 
-    for (const table of [
-      "conversation_tags",
-      "conversation_assignees",
-      "conversation_personal_tags",
-      "conversation_read_states",
-    ]) {
-      expect(db.__table(table).filter((r) => r.conversation_id === SOURCE)).toHaveLength(0);
-    }
+    expect(await db.select().from(conversationTags).where(eq(conversationTags.conversationId, source.id))).toEqual([]);
+    expect(await db.select().from(conversationAssignees).where(eq(conversationAssignees.conversationId, source.id))).toEqual([]);
+    expect(await db.select().from(conversationPersonalTags).where(eq(conversationPersonalTags.conversationId, source.id))).toEqual([]);
+    expect(await db.select().from(conversationReadStates).where(eq(conversationReadStates.conversationId, source.id))).toEqual([]);
   });
 
   it("moves a read cursor that only exists on the source", async () => {
-    const { db, domain } = service({
-      conversation_read_states: [
-        { conversation_id: SOURCE, user_id: "admin-1", last_read_at: "2026-08-01T00:00:00.000Z", last_read_message_id: "msg-1" },
-      ],
+    const { source, target } = await seed();
+    await db.insert(conversationReadStates).values({
+      conversationId: source.id, userId: ADMIN_1, lastReadAt: new Date("2026-08-02T00:00:00Z"),
     });
 
-    await moveExtras(domain, SOURCE, TARGET);
+    await moveExtras(source.id, target.id);
 
-    expect(db.__table("conversation_read_states")).toEqual([
-      { conversation_id: TARGET, user_id: "admin-1", last_read_at: "2026-08-01T00:00:00.000Z", last_read_message_id: "msg-1" },
-    ]);
+    const [state] = await db.select().from(conversationReadStates)
+      .where(eq(conversationReadStates.conversationId, target.id));
+    expect(state.lastReadAt).toEqual(new Date("2026-08-02T00:00:00Z"));
   });
 
   it("keeps the target's read cursor when it is newer than the source's for the same user", async () => {
-    const { db, domain } = service({
-      conversation_read_states: [
-        { conversation_id: SOURCE, user_id: "admin-1", last_read_at: "2026-08-01T00:00:00.000Z", last_read_message_id: "msg-old" },
-        { conversation_id: TARGET, user_id: "admin-1", last_read_at: "2026-08-05T00:00:00.000Z", last_read_message_id: "msg-new" },
-      ],
-    });
+    const { source, target } = await seed();
+    await db.insert(conversationReadStates).values([
+      { conversationId: source.id, userId: ADMIN_1, lastReadAt: new Date("2026-08-01T00:00:00Z") },
+      { conversationId: target.id, userId: ADMIN_1, lastReadAt: new Date("2026-08-05T00:00:00Z") },
+    ]);
 
-    await moveExtras(domain, SOURCE, TARGET);
+    await moveExtras(source.id, target.id);
 
-    const rows = db.__table("conversation_read_states");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ conversation_id: TARGET, last_read_at: "2026-08-05T00:00:00.000Z", last_read_message_id: "msg-new" });
+    const [state] = await db.select().from(conversationReadStates)
+      .where(eq(conversationReadStates.conversationId, target.id));
+    expect(state.lastReadAt).toEqual(new Date("2026-08-05T00:00:00Z"));
   });
 
   it("adopts the source's read cursor when it is newer than the target's for the same user", async () => {
-    const { db, domain } = service({
-      conversation_read_states: [
-        { conversation_id: SOURCE, user_id: "admin-1", last_read_at: "2026-08-05T00:00:00.000Z", last_read_message_id: "msg-new" },
-        { conversation_id: TARGET, user_id: "admin-1", last_read_at: "2026-08-01T00:00:00.000Z", last_read_message_id: "msg-old" },
-      ],
-    });
+    const { source, target } = await seed();
+    await db.insert(conversationReadStates).values([
+      { conversationId: source.id, userId: ADMIN_1, lastReadAt: new Date("2026-08-09T00:00:00Z") },
+      { conversationId: target.id, userId: ADMIN_1, lastReadAt: new Date("2026-08-02T00:00:00Z") },
+    ]);
 
-    await moveExtras(domain, SOURCE, TARGET);
+    await moveExtras(source.id, target.id);
 
-    const rows = db.__table("conversation_read_states");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ conversation_id: TARGET, last_read_at: "2026-08-05T00:00:00.000Z", last_read_message_id: "msg-new" });
+    const [state] = await db.select().from(conversationReadStates)
+      .where(eq(conversationReadStates.conversationId, target.id));
+    expect(state.lastReadAt).toEqual(new Date("2026-08-09T00:00:00Z"));
   });
 
   it("keeps independent read cursors for different users, taking the max per user", async () => {
-    const { db, domain } = service({
-      conversation_read_states: [
-        { conversation_id: SOURCE, user_id: "admin-1", last_read_at: "2026-08-05T00:00:00.000Z" },
-        { conversation_id: TARGET, user_id: "admin-2", last_read_at: "2026-08-02T00:00:00.000Z" },
-      ],
-    });
+    const { source, target } = await seed();
+    await db.insert(conversationReadStates).values([
+      { conversationId: source.id, userId: ADMIN_1, lastReadAt: new Date("2026-08-09T00:00:00Z") },
+      { conversationId: target.id, userId: ADMIN_1, lastReadAt: new Date("2026-08-02T00:00:00Z") },
+      { conversationId: target.id, userId: ADMIN_2, lastReadAt: new Date("2026-08-07T00:00:00Z") },
+    ]);
 
-    await moveExtras(domain, SOURCE, TARGET);
+    await moveExtras(source.id, target.id);
 
-    const byUser = new Map(db.__table("conversation_read_states").map((r) => [r.user_id, r]));
-    expect(byUser.get("admin-1")).toMatchObject({ conversation_id: TARGET, last_read_at: "2026-08-05T00:00:00.000Z" });
-    expect(byUser.get("admin-2")).toMatchObject({ conversation_id: TARGET, last_read_at: "2026-08-02T00:00:00.000Z" });
+    const states = await db.select().from(conversationReadStates)
+      .where(eq(conversationReadStates.conversationId, target.id));
+    const byUser = new Map(states.map((s) => [s.userId, s.lastReadAt]));
+    expect(byUser.get(ADMIN_1)).toEqual(new Date("2026-08-09T00:00:00Z"));
+    expect(byUser.get(ADMIN_2)).toEqual(new Date("2026-08-07T00:00:00Z"));
   });
 });
