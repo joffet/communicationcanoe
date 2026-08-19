@@ -21,7 +21,18 @@ export default defineConfig({
   casing: "snake_case",
   tablesFilter: ["!user", "!session", "!account", "!verification"],
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? "",
+    // Migrations connect as a different, more privileged role than the app.
+    // comm_canoe_app deliberately owns nothing and holds no CREATE on the
+    // schema - that is what stops a leaked application credential from
+    // dropping a table - so it cannot run DDL, and DATABASE_URL is the wrong
+    // credential here by design rather than by oversight.
+    //
+    // Falling back to DATABASE_URL keeps a local throwaway database working
+    // with one variable set, where the app and migration roles are usually the
+    // same. Against anything shared, set MIGRATION_DATABASE_URL: without it
+    // drizzle-kit will connect as the app role and fail on the first CREATE
+    // TABLE, which reads as a schema problem rather than a permissions one.
+    url: process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
   },
   strict: true,
   verbose: true,
