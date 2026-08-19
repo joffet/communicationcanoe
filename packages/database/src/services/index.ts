@@ -6,9 +6,14 @@ import type {
   IdentityContact,
   LogLiveTransferInput,
 } from "@communication-canoe/shared";
-import { and, asc, eq, inArray, lt } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { createDb, type Db } from "../db";
-import { messages, outboundBatchRecipients, outboundBatches } from "../schema";
+import {
+  conversationReadStates,
+  messages,
+  outboundBatchRecipients,
+  outboundBatches,
+} from "../schema";
 import type { AppSupabaseClient } from "../client";
 import { createServiceClient, normalizeEmail, normalizePhone } from "../client";
 import {
@@ -1103,12 +1108,17 @@ export class DomainService {
    * by getConversationThread (to gather messages across the whole merge
    * chain, since messages are never physically moved) and
    * listRelatedConversations. */
+  /** Walks merged_into_id transitively - a conversation merged into another
+   * which was itself merged carries the whole chain. Stays a Postgres function
+   * rather than becoming a recursive CTE here: it is the same walk either way,
+   * and leaving it in SQL keeps one definition rather than two that can drift. */
   async getConversationMergeChainIds(conversationId: string): Promise<string[]> {
-    const { data, error } = await this.db.rpc("conversation_merge_chain_ids", {
-      p_conversation_id: conversationId,
-    });
-    if (error) throw error;
-    return data ?? [];
+    // Db is the driver-agnostic PgDatabase so the pglite test harness and
+    // node-postgres share one type, which costs execute() its result generic.
+    const result = (await this.orm.execute(
+      sql`SELECT * FROM conversation_merge_chain_ids(${conversationId}::uuid)`,
+    )) as { rows: Array<{ conversation_merge_chain_ids: string }> };
+    return result.rows.map((row) => row.conversation_merge_chain_ids);
   }
 
   /**
@@ -1396,31 +1406,34 @@ export class DomainService {
   async markConversationRead(conversationId: string, userId: string): Promise<ConversationReadState> {
     const chainIds = await this.getConversationMergeChainIds(conversationId);
 
-    const { data: latestMessage, error: msgError } = await this.db
-      .from("messages")
-      .select("id, created_at")
-      .in("conversation_id", chainIds.length ? chainIds : [conversationId])
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (msgError) throw msgError;
+    const [latestMessage] = await this.orm
+      .select({ id: messages.id, createdAt: messages.createdAt })
+      .from(messages)
+      .where(inArray(messages.conversationId, chainIds.length ? chainIds : [conversationId]))
+      .orderBy(desc(messages.createdAt))
+      .limit(1);
 
-    const { data, error } = await this.db
-      .from("conversation_read_states")
-      .upsert(
-        {
-          conversation_id: conversationId,
-          user_id: userId,
-          last_read_at: latestMessage?.created_at ?? new Date().toISOString(),
-          last_read_message_id: latestMessage?.id ?? null,
+    // Upsert on the composite (conversation_id, user_id) primary key: marking
+    // read is idempotent and callers repeat it freely, so a plain insert would
+    // fail the second time a viewer opens the same conversation.
+    const [state] = await this.orm
+      .insert(conversationReadStates)
+      .values({
+        conversationId,
+        userId,
+        lastReadAt: latestMessage?.createdAt ?? new Date(),
+        lastReadMessageId: latestMessage?.id ?? null,
+      })
+      .onConflictDoUpdate({
+        target: [conversationReadStates.conversationId, conversationReadStates.userId],
+        set: {
+          lastReadAt: latestMessage?.createdAt ?? new Date(),
+          lastReadMessageId: latestMessage?.id ?? null,
         },
-        { onConflict: "conversation_id,user_id" },
-      )
-      .select("*")
-      .single();
+      })
+      .returning();
 
-    if (error) throw error;
-    return data;
+    return state;
   }
 
   /** Batched per-viewer relevance/unread lookup, mirroring

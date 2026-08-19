@@ -135,37 +135,7 @@ describe("getConversationMetricsForViewer", () => {
   });
 });
 
-describe("markConversationRead", () => {
-  it("advances the cursor to the newest message and is idempotent on repeat calls", async () => {
-    const { db, domain } = service({
-      messages: [
-        { id: "msg-1", conversation_id: "conv-f", created_at: "2026-08-01T00:00:00.000Z" },
-        { id: "msg-2", conversation_id: "conv-f", created_at: "2026-08-02T00:00:00.000Z" },
-      ],
-    });
-    db.__registerRpc("conversation_merge_chain_ids", () => ["conv-f"]);
-
-    const first = await domain.markConversationRead("conv-f", VIEWER);
-    expect(first).toMatchObject({ last_read_message_id: "msg-2", last_read_at: "2026-08-02T00:00:00.000Z" });
-
-    const second = await domain.markConversationRead("conv-f", VIEWER);
-    expect(second).toMatchObject({ last_read_message_id: "msg-2" });
-    expect(db.__table("conversation_read_states")).toHaveLength(1);
-  });
-
-  it("reads across the whole merge chain, not just the conversation id passed in", async () => {
-    const { db, domain } = service({
-      messages: [
-        { id: "msg-old", conversation_id: "conv-target", created_at: "2026-08-01T00:00:00.000Z" },
-        { id: "msg-new", conversation_id: "conv-source", created_at: "2026-08-03T00:00:00.000Z" },
-      ],
-    });
-    // Simulates a merge where conv-source merged into conv-target - the
-    // chain RPC returns both ids for either member.
-    db.__registerRpc("conversation_merge_chain_ids", () => ["conv-target", "conv-source"]);
-
-    const readState = await domain.markConversationRead("conv-target", VIEWER);
-
-    expect(readState).toMatchObject({ last_read_message_id: "msg-new", last_read_at: "2026-08-03T00:00:00.000Z" });
-  });
-});
+// markConversationRead's tests moved to conversation-read-states.test.ts when
+// that method converted to Drizzle. They run against a real Postgres now, so
+// the merge chain is an actual merged_into_id walk rather than a stubbed RPC
+// return, and every foreign key the read state hangs off has to exist.
