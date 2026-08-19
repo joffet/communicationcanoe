@@ -1,4 +1,5 @@
 import {
+  identities,
   conversationAssignees,
   conversationParticipants,
   conversationReadStates,
@@ -641,7 +642,12 @@ export type DocumentChunkInsert = {
 export type Tables<T extends keyof DatabaseTables> = DatabaseTables[T]["Row"];
 
 export type Tenant = TenantRow;
-export type Identity = IdentityRow;
+/** Inferred from the Drizzle schema - camelCase - now that the identity
+ * methods are converted. ConversationWithIdentity therefore carries a
+ * camelCase `identity` beside snake_case conversation fields until the
+ * conversation reads move too. Ugly and temporary, but coherent: the
+ * alternative was converting both closures in one change. */
+export type Identity = typeof identities.$inferSelect;
 export type Conversation = ConversationRow;
 export type Message = MessageRow;
 export type Team = TeamRow;

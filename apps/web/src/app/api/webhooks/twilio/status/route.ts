@@ -99,7 +99,7 @@ async function recordOutcomeAndMaybeNotifyReside(
     threshold,
   );
 
-  if ((crossedThreshold || clearedFlag) && thread.identity.reside_resident_id) {
+  if ((crossedThreshold || clearedFlag) && thread.identity.resideResidentId) {
     // message.tenant_id is comm-canoe's internal uuid; reside only recognises
     // its own client uid, so translate before calling out (mirrors the SES
     // bounce path in webhooks/ses/notifications).
@@ -108,7 +108,7 @@ async function recordOutcomeAndMaybeNotifyReside(
 
     await notifyResideIdentityStatus({
       resideClientUid: tenant.reside_client_uid,
-      resideResidentId: thread.identity.reside_resident_id,
+      resideResidentId: thread.identity.resideResidentId,
       channel: "sms",
       status: crossedThreshold ? "undeliverable" : "deliverable",
     });
