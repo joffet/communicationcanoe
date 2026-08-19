@@ -53,7 +53,7 @@ export class ChatSession {
         messages: thread.messages.map((m) => ({
           body: m.body,
           direction: m.direction,
-          senderType: m.sender_type,
+          senderType: m.senderType,
         })),
       });
     }
@@ -86,9 +86,9 @@ export class ChatSession {
           id: message.id,
           body: message.body,
           direction: message.direction,
-          senderType: message.sender_type,
+          senderType: message.senderType,
           channel: "web_chat",
-          createdAt: message.created_at,
+          createdAt: message.createdAt.toISOString(),
         });
       },
       onToolCall: (name, args, callId) => {
@@ -156,9 +156,9 @@ export class ChatSession {
         id: message.id,
         body: message.body,
         direction: message.direction,
-        senderType: message.sender_type,
+        senderType: message.senderType,
         channel: "web_chat",
-        createdAt: message.created_at,
+        createdAt: message.createdAt.toISOString(),
       });
       return;
     }
@@ -280,9 +280,9 @@ export class ChatSession {
       id: message.id,
       body: message.body,
       direction: message.direction,
-      senderType: message.sender_type,
+      senderType: message.senderType,
       channel: "web_chat",
-      createdAt: message.created_at,
+      createdAt: message.createdAt.toISOString(),
     });
     void agentName;
   }

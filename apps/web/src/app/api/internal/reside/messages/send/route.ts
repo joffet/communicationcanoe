@@ -52,10 +52,10 @@ export async function POST(request: Request) {
       return Response.json({
         message: {
           id: existing.id,
-          conversationId: existing.conversation_id,
-          deliveryStatus: existing.delivery_status,
-          providerMessageId: existing.provider_message_id,
-          deliveryError: existing.delivery_error,
+          conversationId: existing.conversationId,
+          deliveryStatus: existing.deliveryStatus,
+          providerMessageId: existing.providerMessageId,
+          deliveryError: existing.deliveryError,
           deduplicated: true,
         },
       });
@@ -97,10 +97,10 @@ export async function POST(request: Request) {
   return Response.json({
     message: {
       id: sent.id,
-      conversationId: sent.conversation_id,
-      deliveryStatus: sent.delivery_status,
-      providerMessageId: sent.provider_message_id,
-      deliveryError: sent.delivery_error,
+      conversationId: sent.conversationId,
+      deliveryStatus: sent.deliveryStatus,
+      providerMessageId: sent.providerMessageId,
+      deliveryError: sent.deliveryError,
     },
   });
 }

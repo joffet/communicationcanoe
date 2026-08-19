@@ -39,7 +39,7 @@ async function dispatchDueScheduledMessages(): Promise<void> {
       const claimed = await domain.claimScheduledMessage(id);
       if (!claimed) continue;
 
-      const thread = await domain.getConversationThread(claimed.conversation_id);
+      const thread = await domain.getConversationThread(claimed.conversationId);
       if (!thread) {
         await domain.updateMessageDeliveryStatus(id, {
           deliveryStatus: "failed",
@@ -48,7 +48,7 @@ async function dispatchDueScheduledMessages(): Promise<void> {
         continue;
       }
 
-      const tenant = await admin.getTenantById(claimed.tenant_id);
+      const tenant = await admin.getTenantById(claimed.tenantId);
       if (!tenant) {
         await domain.updateMessageDeliveryStatus(id, {
           deliveryStatus: "failed",

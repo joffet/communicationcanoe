@@ -80,7 +80,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             channel: m.channel,
             direction: m.direction,
             body: m.body,
-            createdAt: m.created_at,
+            createdAt: m.createdAt.toISOString(),
           })),
         });
         await domain.updateConversationSummary(guard.conversation.id, summary);

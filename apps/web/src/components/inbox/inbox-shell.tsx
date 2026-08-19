@@ -245,8 +245,8 @@ export function InboxShell({
                   >
                     <div className="mb-1 flex items-center gap-2 text-xs opacity-70">
                       <Badge variant="secondary">{m.channel}</Badge>
-                      <span>{senderLabel(m.sender_type)}</span>
-                      <span>{formatRelativeTime(m.created_at)}</span>
+                      <span>{senderLabel(m.senderType)}</span>
+                      <span>{formatRelativeTime(m.createdAt.toISOString())}</span>
                     </div>
                     {m.subject && <p className="mb-1 font-medium">{m.subject}</p>}
                     <p className="whitespace-pre-wrap">{m.body}</p>

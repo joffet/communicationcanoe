@@ -37,7 +37,7 @@ async function reviewPendingMessages(): Promise<void> {
       const message = await domain.getMessageById(id);
       if (!message) continue;
 
-      const thread = await domain.getConversationThread(message.conversation_id);
+      const thread = await domain.getConversationThread(message.conversationId);
       const recentMessages = (thread?.messages ?? [])
         .filter((m) => m.id !== id)
         .slice(-RECENT_MESSAGE_CONTEXT_LIMIT)

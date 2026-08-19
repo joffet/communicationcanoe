@@ -74,9 +74,9 @@ export function toMemberSafeThread(conversation: ConversationThread): MemberConv
         id: m.id,
         channel: m.channel,
         direction: m.direction,
-        sender_type: m.sender_type,
+        sender_type: m.senderType,
         body: m.body,
-        created_at: m.created_at,
+        created_at: m.createdAt.toISOString(),
       })),
   };
 }

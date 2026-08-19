@@ -62,8 +62,8 @@ export async function dispatchOutboundMessage(params: {
 
     if (message.channel === "email") {
       let html = withOpenTrackingPixel(message.body, message.id);
-      if (message.sender_type === "internal_user") {
-        html = withMemberPortalLink(html, message.conversation_id, tenant);
+      if (message.senderType === "internal_user") {
+        html = withMemberPortalLink(html, message.conversationId, tenant);
       }
       const result = await sendTenantReplyEmail({
         to,

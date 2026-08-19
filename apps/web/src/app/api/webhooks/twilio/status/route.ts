@@ -83,13 +83,13 @@ export async function POST(request: Request) {
 
 async function recordOutcomeAndMaybeNotifyReside(
   domain: ReturnType<typeof createDomainService>,
-  message: { id: string; tenant_id: string; conversation_id: string },
+  message: { id: string; tenantId: string; conversationId: string },
   outcome: "success" | "hard_failure",
 ): Promise<void> {
-  const thread = await domain.getConversationThread(message.conversation_id);
+  const thread = await domain.getConversationThread(message.conversationId);
   if (!thread) return;
 
-  const settings = await domain.getTenantSettings(message.tenant_id);
+  const settings = await domain.getTenantSettings(message.tenantId);
   const threshold = settings?.bounce_threshold ?? 3;
 
   const { crossedThreshold, clearedFlag } = await domain.recordChannelDeliveryOutcome(
@@ -100,10 +100,10 @@ async function recordOutcomeAndMaybeNotifyReside(
   );
 
   if ((crossedThreshold || clearedFlag) && thread.identity.resideResidentId) {
-    // message.tenant_id is comm-canoe's internal uuid; reside only recognises
+    // message.tenantId is comm-canoe's internal uuid; reside only recognises
     // its own client uid, so translate before calling out (mirrors the SES
     // bounce path in webhooks/ses/notifications).
-    const tenant = await createAdminService().getTenantById(message.tenant_id);
+    const tenant = await createAdminService().getTenantById(message.tenantId);
     if (!tenant) return;
 
     await notifyResideIdentityStatus({

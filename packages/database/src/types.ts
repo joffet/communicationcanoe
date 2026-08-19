@@ -1,5 +1,6 @@
 import {
   identities,
+  messages,
   conversationAssignees,
   conversationParticipants,
   conversationReadStates,
@@ -649,7 +650,12 @@ export type Tenant = TenantRow;
  * alternative was converting both closures in one change. */
 export type Identity = typeof identities.$inferSelect;
 export type Conversation = ConversationRow;
-export type Message = MessageRow;
+/** Inferred from the Drizzle schema - camelCase. ConversationThread therefore
+ * carries camelCase messages and identity beside snake_case conversation
+ * fields until the conversation reads convert too; that seam is deliberate and
+ * short-lived, and it is what let the message closure ship on its own rather
+ * than as one 60-method change. */
+export type Message = typeof messages.$inferSelect;
 export type Team = TeamRow;
 export type LiveTransfer = LiveTransferRow;
 export type IdentityConversionLog = IdentityConversionLogRow;

@@ -119,9 +119,9 @@ async function drainPendingRecipients(): Promise<void> {
       const sent = await dispatchOutboundMessage({ tenant, message, to });
 
       await domain.updateOutboundBatchRecipientStatus(recipient.id, {
-        status: sent.delivery_status === "failed" ? "failed" : "sent",
+        status: sent.deliveryStatus === "failed" ? "failed" : "sent",
         messageId: sent.id,
-        error: sent.delivery_error ?? null,
+        error: sent.deliveryError ?? null,
       });
       await domain.incrementOutboundBatchCompleted(recipient.batchId);
     } catch (err) {
