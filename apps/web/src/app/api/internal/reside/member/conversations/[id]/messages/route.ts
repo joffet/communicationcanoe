@@ -49,7 +49,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     (m) =>
       m.visibility === "external" &&
       m.direction === "inbound" &&
-      new Date(m.created_at).getTime() >= windowStart,
+      new Date(m.createdAt).getTime() >= windowStart,
   ).length;
   if (recentReplyCount >= RATE_LIMIT_MAX) {
     return Response.json({ error: "rate_limited" }, { status: 429 });
@@ -79,9 +79,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       id: message.id,
       channel: message.channel,
       direction: message.direction,
-      sender_type: message.sender_type,
+      sender_type: message.senderType,
       body: message.body,
-      created_at: message.created_at,
+      created_at: message.createdAt,
     },
   });
 }

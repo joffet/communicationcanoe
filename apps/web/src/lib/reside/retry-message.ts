@@ -18,11 +18,11 @@ export async function retryFailedMessage(messageId: string) {
   }
 
   const [tenant, thread] = await Promise.all([
-    admin.getTenantById(message.tenant_id),
-    domain.getConversationThread(message.conversation_id),
+    admin.getTenantById(message.tenantId),
+    domain.getConversationThread(message.conversationId),
   ]);
-  if (!tenant) throw new Error(`Tenant not found: ${message.tenant_id}`);
-  if (!thread) throw new Error(`Conversation not found: ${message.conversation_id}`);
+  if (!tenant) throw new Error(`Tenant not found: ${message.tenantId}`);
+  if (!thread) throw new Error(`Conversation not found: ${message.conversationId}`);
 
   const to = message.channel === "sms" ? thread.identity.phone : thread.identity.email;
   if (!to) {

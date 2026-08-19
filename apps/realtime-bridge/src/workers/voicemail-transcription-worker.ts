@@ -42,7 +42,7 @@ async function transcribePendingVoicemails(): Promise<void> {
       if (!claimed) continue;
 
       const message = await domain.getMessageById(id);
-      if (!message || !message.audio_url) {
+      if (!message || !message.audioUrl) {
         await domain.markMessageTranscriptionFailed(id, "No audio_url on message");
         continue;
       }
@@ -50,7 +50,7 @@ async function transcribePendingVoicemails(): Promise<void> {
       // Twilio recording media requires authenticated fetch - the same
       // account credentials already used for outbound SMS/call control.
       const auth = Buffer.from(`${config.twilioAccountSid}:${config.twilioAuthToken}`).toString("base64");
-      const audioResponse = await fetch(`${message.audio_url}.mp3`, {
+      const audioResponse = await fetch(`${message.audioUrl}.mp3`, {
         headers: { Authorization: `Basic ${auth}` },
       });
       if (!audioResponse.ok) {
@@ -70,7 +70,7 @@ async function transcribePendingVoicemails(): Promise<void> {
       // already available here), but realtime-bridge can't cross-import
       // from apps/web (separate app, no shared alias - same boundary Phase
       // 5's notify helpers respected by living in realtime-bridge instead).
-      void triggerConversationRouting(domain, message.conversation_id, message.tenant_id).catch(console.error);
+      void triggerConversationRouting(domain, message.conversationId, message.tenantId).catch(console.error);
     } catch (err) {
       console.error(`[voicemail-transcription-worker] message ${id} failed:`, err);
       // Never left stuck at pending - same safety-net convention as every

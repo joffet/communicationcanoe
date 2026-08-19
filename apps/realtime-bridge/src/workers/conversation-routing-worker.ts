@@ -48,7 +48,7 @@ async function reviewPendingTopicChecks(): Promise<void> {
       const claimed = await domain.claimTopicCheckMessage(id);
       if (!claimed) continue; // another tick already claimed it
 
-      const thread = await domain.getConversationThread(claimed.conversation_id);
+      const thread = await domain.getConversationThread(claimed.conversationId);
       if (!thread) {
         await domain.markTopicCheckReviewed(id);
         continue;
@@ -68,12 +68,12 @@ async function reviewPendingTopicChecks(): Promise<void> {
         // over-triggering on this tenant" - this caps the blast radius of
         // a systematic misfire.
         const recentAiSplits = await domain.countRecentAiSplits(
-          claimed.tenant_id,
+          claimed.tenantId,
           AI_SPLIT_CIRCUIT_BREAKER_WINDOW_MINUTES,
         );
         if (recentAiSplits >= AI_SPLIT_CIRCUIT_BREAKER_LIMIT) {
           console.warn(
-            `[conversation-routing-worker] circuit breaker tripped for tenant ${claimed.tenant_id} ` +
+            `[conversation-routing-worker] circuit breaker tripped for tenant ${claimed.tenantId} ` +
               `(${recentAiSplits} AI splits in the last ${AI_SPLIT_CIRCUIT_BREAKER_WINDOW_MINUTES}m) - ` +
               `skipping split for message ${id}`,
           );
@@ -82,7 +82,7 @@ async function reviewPendingTopicChecks(): Promise<void> {
           // itself and sweeps every message from this one's created_at
           // onward - correctly cascades if a later message already landed
           // here while this one sat pending/processing.
-          await domain.splitConversation(claimed.tenant_id, claimed.conversation_id, id, null, {
+          await domain.splitConversation(claimed.tenantId, claimed.conversationId, id, null, {
             triggerType: "ai",
             reasoning: result.reasoning,
           });

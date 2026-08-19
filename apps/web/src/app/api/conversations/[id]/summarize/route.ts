@@ -14,7 +14,7 @@ export async function POST(
       channel: m.channel,
       direction: m.direction,
       body: m.body,
-      createdAt: m.created_at,
+      createdAt: m.createdAt.toISOString(),
     })),
   });
 

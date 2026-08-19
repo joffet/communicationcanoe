@@ -517,71 +517,59 @@ export class DomainService {
   }
 
   async appendMessage(input: AppendMessageInput): Promise<Message> {
-    const { data, error } = await this.db
-      .from("messages")
-      .insert({
-        tenant_id: input.tenantId,
-        conversation_id: input.conversationId,
+    // Two AFTER INSERT triggers hang off this table - conversations.last_message_at
+    // and the SLA response clock - and they fire on the row regardless of which
+    // client wrote it, so nothing here has to maintain either.
+    const [message] = await this.orm
+      .insert(messages)
+      .values({
+        tenantId: input.tenantId,
+        conversationId: input.conversationId,
         channel: input.channel,
         direction: input.direction,
-        sender_type: input.senderType,
-        sender_id: input.senderId ?? null,
+        senderType: input.senderType,
+        senderId: input.senderId ?? null,
         body: input.body,
         subject: input.subject ?? null,
-        audio_url: input.audioUrl ?? null,
+        audioUrl: input.audioUrl ?? null,
         transcript: input.transcript ?? null,
-        ai_summary: input.aiSummary ?? null,
-        idempotency_key: input.idempotencyKey ?? null,
-        delivery_status: input.deliveryStatus ?? null,
+        aiSummary: input.aiSummary ?? null,
+        idempotencyKey: input.idempotencyKey ?? null,
+        deliveryStatus: input.deliveryStatus ?? null,
         // Omit the key entirely (not `?? null`) when unset, so the column's
         // NOT NULL DEFAULT 'internal' applies - explicit null would violate it.
         ...(input.visibility !== undefined && { visibility: input.visibility }),
-        scheduled_send_at: input.scheduledSendAt ?? null,
-        ai_review_status: input.aiReviewStatus ?? null,
-        topic_check_status: input.topicCheckStatus ?? null,
-        transcription_status: input.transcriptionStatus ?? null,
+        scheduledSendAt: input.scheduledSendAt ? new Date(input.scheduledSendAt) : null,
+        aiReviewStatus: input.aiReviewStatus ?? null,
+        topicCheckStatus: input.topicCheckStatus ?? null,
+        transcriptionStatus: input.transcriptionStatus ?? null,
       })
-      .select("*")
-      .single();
+      .returning();
 
-    if (error) throw error;
-    return data;
+    return message;
   }
 
   async getMessageById(messageId: string): Promise<Message | null> {
-    const { data, error } = await this.db
-      .from("messages")
-      .select("*")
-      .eq("id", messageId)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [message] = await this.orm
+      .select().from(messages).where(eq(messages.id, messageId)).limit(1);
+    return message ?? null;
   }
 
   /** Looks up a prior send by reside's idempotency key. Scoped by tenant to
    * match the partial unique index, so two tenants can never collide. */
   async getMessageByIdempotencyKey(tenantId: string, idempotencyKey: string): Promise<Message | null> {
-    const { data, error } = await this.db
-      .from("messages")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .eq("idempotency_key", idempotencyKey)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [message] = await this.orm
+      .select().from(messages)
+      .where(and(eq(messages.tenantId, tenantId), eq(messages.idempotencyKey, idempotencyKey)))
+      .limit(1);
+    return message ?? null;
   }
 
   async getMessageByProviderMessageId(providerMessageId: string): Promise<Message | null> {
-    const { data, error } = await this.db
-      .from("messages")
-      .select("*")
-      .eq("provider_message_id", providerMessageId)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [message] = await this.orm
+      .select().from(messages)
+      .where(eq(messages.providerMessageId, providerMessageId)).limit(1);
+    return message ?? null;
   }
 
   async updateMessageDeliveryStatus(
@@ -596,46 +584,38 @@ export class DomainService {
     },
   ): Promise<Message> {
     if (patch.incrementAttempts) {
-      const { data: current, error: fetchError } = await this.db
-        .from("messages")
-        .select("delivery_attempts")
-        .eq("id", messageId)
-        .single();
-      if (fetchError) throw fetchError;
-
-      const { data, error } = await this.db
-        .from("messages")
-        .update({
-          delivery_status: patch.deliveryStatus,
-          provider_message_id: patch.providerMessageId,
-          delivery_error: patch.deliveryError ?? null,
-          sent_at: patch.sentAt,
-          delivered_at: patch.deliveredAt,
-          delivery_attempts: current.delivery_attempts + 1,
+      // Incremented in SQL rather than read-then-write: two delivery webhooks
+      // for the same message can land at once, and a JS increment off a
+      // snapshot loses one of them.
+      const [updated] = await this.orm
+        .update(messages)
+        .set({
+          deliveryStatus: patch.deliveryStatus,
+          providerMessageId: patch.providerMessageId,
+          deliveryError: patch.deliveryError ?? null,
+          sentAt: patch.sentAt ? new Date(patch.sentAt) : null,
+          deliveredAt: patch.deliveredAt ? new Date(patch.deliveredAt) : null,
+          deliveryAttempts: sql`${messages.deliveryAttempts} + 1`,
         })
-        .eq("id", messageId)
-        .select("*")
-        .single();
+        .where(eq(messages.id, messageId))
+        .returning();
 
-      if (error) throw error;
-      return data;
+      return updated;
     }
 
-    const { data, error } = await this.db
-      .from("messages")
-      .update({
-        delivery_status: patch.deliveryStatus,
-        provider_message_id: patch.providerMessageId,
-        delivery_error: patch.deliveryError ?? null,
-        sent_at: patch.sentAt,
-        delivered_at: patch.deliveredAt,
+    const [updated] = await this.orm
+      .update(messages)
+      .set({
+        deliveryStatus: patch.deliveryStatus,
+        providerMessageId: patch.providerMessageId,
+        deliveryError: patch.deliveryError ?? null,
+        sentAt: patch.sentAt ? new Date(patch.sentAt) : null,
+        deliveredAt: patch.deliveredAt ? new Date(patch.deliveredAt) : null,
       })
-      .eq("id", messageId)
-      .select("*")
-      .single();
+      .where(eq(messages.id, messageId))
+      .returning();
 
-    if (error) throw error;
-    return data;
+    return updated;
   }
 
   // ---- Scheduled external-send dispatch (Phase 3) ----
@@ -670,17 +650,19 @@ export class DomainService {
    * listDueScheduledMessageIds above - a flagged message can never be
    * claimed even if something else raced past the snapshot check. */
   async claimScheduledMessage(messageId: string): Promise<Message | null> {
-    const { data, error } = await this.db
-      .from("messages")
-      .update({ delivery_status: "sending" })
-      .eq("id", messageId)
-      .eq("delivery_status", "queued")
-      .eq("ai_review_status", "approved")
-      .select("*")
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [data] = await this.orm
+      .update(messages)
+      .set({ deliveryStatus: "sending" })
+      .where(and(
+        eq(messages.id, messageId),
+        eq(messages.deliveryStatus, "queued"),
+        eq(messages.aiReviewStatus, "approved"),
+      ))
+      .returning();
+    // `?? null` matters: destructuring an empty returning() array yields
+    // undefined, and callers here check for null. Losing that turns "another
+    // worker claimed it" into a value that fails a `=== null` guard.
+    return data ?? null;
   }
 
   // ---- Tone review (Phase 6) ----
@@ -689,16 +671,11 @@ export class DomainService {
    * or scheduled-time filter, review should start immediately on queue, not
    * wait for the send delay to elapse. */
   async listPendingToneReviewMessageIds(limit: number): Promise<string[]> {
-    const { data, error } = await this.db
-      .from("messages")
-      .select("id")
-      .eq("visibility", "external")
-      .eq("ai_review_status", "pending")
-      .order("created_at", { ascending: true })
-      .limit(limit);
-
-    if (error) throw error;
-    return (data ?? []).map((row) => row.id as string);
+    const rows = await this.orm
+      .select({ id: messages.id }).from(messages)
+      .where(and(eq(messages.visibility, "external"), eq(messages.aiReviewStatus, "pending")))
+      .orderBy(asc(messages.createdAt)).limit(limit);
+    return rows.map((row) => row.id);
   }
 
   /** Writes a tone-review verdict. No separate atomic-claim step (unlike
@@ -710,16 +687,12 @@ export class DomainService {
     messageId: string,
     result: { status: "approved" | "flagged"; reasoning: string },
   ): Promise<Message | null> {
-    const { data, error } = await this.db
-      .from("messages")
-      .update({ ai_review_status: result.status, ai_review_reasoning: result.reasoning })
-      .eq("id", messageId)
-      .eq("ai_review_status", "pending")
-      .select("*")
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [data] = await this.orm
+      .update(messages)
+      .set({ aiReviewStatus: result.status, aiReviewReasoning: result.reasoning })
+      .where(and(eq(messages.id, messageId), eq(messages.aiReviewStatus, "pending")))
+      .returning();
+    return data ?? null;
   }
 
   /** Admin override for a flagged (or still-pending) message - unblocks the
@@ -727,16 +700,15 @@ export class DomainService {
    * review. Conditional on the row not already being approved, matching the
    * same idempotent-update idiom used throughout this file. */
   async approveFlaggedMessage(messageId: string): Promise<Message | null> {
-    const { data, error } = await this.db
-      .from("messages")
-      .update({ ai_review_status: "approved" })
-      .eq("id", messageId)
-      .in("ai_review_status", ["flagged", "pending"])
-      .select("*")
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [data] = await this.orm
+      .update(messages)
+      .set({ aiReviewStatus: "approved" })
+      .where(and(
+        eq(messages.id, messageId),
+        inArray(messages.aiReviewStatus, ["flagged", "pending"]),
+      ))
+      .returning();
+    return data ?? null;
   }
 
   /** Best-effort cancel of a still-pending scheduled send - the same
@@ -744,16 +716,12 @@ export class DomainService {
    * worker already claimed it (delivery_status moved to 'sending' or
    * beyond), this correctly no-ops and returns null. */
   async cancelScheduledMessage(messageId: string): Promise<Message | null> {
-    const { data, error } = await this.db
-      .from("messages")
-      .update({ delivery_status: "canceled" })
-      .eq("id", messageId)
-      .eq("delivery_status", "queued")
-      .select("*")
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [data] = await this.orm
+      .update(messages)
+      .set({ deliveryStatus: "canceled" })
+      .where(and(eq(messages.id, messageId), eq(messages.deliveryStatus, "queued")))
+      .returning();
+    return data ?? null;
   }
 
   /**
@@ -933,7 +901,7 @@ export class DomainService {
       OutboundBatchRecipient & {
         deliveryStatus: MessageDeliveryStatus | null;
         deliveryError: string | null;
-        openedAt: string | null;
+        openedAt: Date | null;
       }
     >;
   } | null> {
@@ -958,9 +926,9 @@ export class DomainService {
         const message = r.messageId ? messageMap.get(r.messageId) : undefined;
         return {
           ...r,
-          deliveryStatus: message?.delivery_status ?? null,
-          deliveryError: message?.delivery_error ?? null,
-          openedAt: message?.opened_at ?? null,
+          deliveryStatus: message?.deliveryStatus ?? null,
+          deliveryError: message?.deliveryError ?? null,
+          openedAt: message?.openedAt ?? null,
         };
       }),
     };
@@ -969,13 +937,10 @@ export class DomainService {
   /** Idempotent first-open recorder for the tracking pixel - only sets
    * opened_at if unset, so the timestamp reflects the first open. */
   async markMessageOpened(messageId: string): Promise<void> {
-    const { error } = await this.db
-      .from("messages")
-      .update({ opened_at: new Date().toISOString() })
-      .eq("id", messageId)
-      .is("opened_at", null);
-
-    if (error) throw error;
+    await this.orm
+      .update(messages)
+      .set({ openedAt: new Date() })
+      .where(and(eq(messages.id, messageId), isNull(messages.openedAt)));
   }
 
   /**
@@ -1183,20 +1148,20 @@ export class DomainService {
 
     const chainIds = await this.getConversationMergeChainIds(canonicalId);
 
-    const { data: messages, error: msgError } = await this.db
-      .from("messages")
-      .select("*")
-      .in("conversation_id", chainIds)
-      .order("created_at", { ascending: true });
-
-    if (msgError) throw msgError;
+    // Reads the whole merge chain, not just the canonical id: a thread that
+    // absorbed another still has to show what arrived on the absorbed side.
+    const threadMessages = await this.orm
+      .select()
+      .from(messages)
+      .where(inArray(messages.conversationId, chainIds))
+      .orderBy(asc(messages.createdAt));
 
     const extrasMap = await this.getConversationExtrasMap([canonicalId]);
 
     return {
       ...conversation,
       identity,
-      messages: messages ?? [],
+      messages: threadMessages,
       ...(extrasMap.get(canonicalId) ?? { participants: [], tags: [], assignees: [] }),
     };
   }
@@ -1958,15 +1923,11 @@ export class DomainService {
   // ---- AI-automated conversation routing (Phase 9) ----
 
   async listPendingTopicCheckMessageIds(limit: number): Promise<string[]> {
-    const { data, error } = await this.db
-      .from("messages")
-      .select("id")
-      .eq("topic_check_status", "pending")
-      .order("created_at", { ascending: true })
-      .limit(limit);
-
-    if (error) throw error;
-    return (data ?? []).map((row) => row.id as string);
+    const rows = await this.orm
+      .select({ id: messages.id }).from(messages)
+      .where(eq(messages.topicCheckStatus, "pending"))
+      .orderBy(asc(messages.createdAt)).limit(limit);
+    return rows.map((row) => row.id);
   }
 
   /** Atomic claim, mirroring claimScheduledMessage - required here (unlike
@@ -1976,16 +1937,12 @@ export class DomainService {
    * overlapping worker ticks from both acting on the same message. Found by
    * a design-review pass, not by testing. */
   async claimTopicCheckMessage(messageId: string): Promise<Message | null> {
-    const { data, error } = await this.db
-      .from("messages")
-      .update({ topic_check_status: "processing" })
-      .eq("id", messageId)
-      .eq("topic_check_status", "pending")
-      .select("*")
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    const [data] = await this.orm
+      .update(messages)
+      .set({ topicCheckStatus: "processing" })
+      .where(and(eq(messages.id, messageId), eq(messages.topicCheckStatus, "pending")))
+      .returning();
+    return data ?? null;
   }
 
   /** Terminal write for a claimed message, regardless of outcome (split or
@@ -1994,8 +1951,8 @@ export class DomainService {
    * so this always needs its own call, not something splitConversation
    * does implicitly. */
   async markTopicCheckReviewed(messageId: string): Promise<void> {
-    const { error } = await this.db.from("messages").update({ topic_check_status: "reviewed" }).eq("id", messageId);
-    if (error) throw error;
+    await this.orm.update(messages)
+      .set({ topicCheckStatus: "reviewed" }).where(eq(messages.id, messageId));
   }
 
   /** Cheap circuit breaker using data already being written - checked
@@ -2524,28 +2481,20 @@ export class DomainService {
    * Returns false when another replica got there first, so the expensive
    * OpenAI call happens exactly once per voicemail across all replicas. */
   async claimVoicemailTranscription(messageId: string): Promise<boolean> {
-    const { data, error } = await this.db
-      .from("messages")
-      .update({ transcription_status: "transcribing" })
-      .eq("id", messageId)
-      .eq("transcription_status", "pending")
-      .select("id")
-      .maybeSingle();
-
-    if (error) throw error;
-    return Boolean(data);
+    const claimed = await this.orm
+      .update(messages)
+      .set({ transcriptionStatus: "transcribing" })
+      .where(and(eq(messages.id, messageId), eq(messages.transcriptionStatus, "pending")))
+      .returning({ id: messages.id });
+    return claimed.length > 0;
   }
 
   async listPendingVoicemailTranscriptionMessageIds(limit: number): Promise<string[]> {
-    const { data, error } = await this.db
-      .from("messages")
-      .select("id")
-      .eq("transcription_status", "pending")
-      .order("created_at", { ascending: true })
-      .limit(limit);
-
-    if (error) throw error;
-    return (data ?? []).map((row) => row.id as string);
+    const rows = await this.orm
+      .select({ id: messages.id }).from(messages)
+      .where(eq(messages.transcriptionStatus, "pending"))
+      .orderBy(asc(messages.createdAt)).limit(limit);
+    return rows.map((row) => row.id);
   }
 
   /** Plain conditional update, not an atomic claim like Phase 9/10's workers
@@ -2555,24 +2504,20 @@ export class DomainService {
    * exactly once), so the simpler check-only-on-write pattern (mirroring
    * applyToneReviewResult) is sufficient here. */
   async updateMessageTranscription(messageId: string, body: string): Promise<void> {
-    const { error } = await this.db
-      .from("messages")
-      .update({ body, transcript: body, transcription_status: "ready" })
-      .eq("id", messageId)
-      .eq("transcription_status", "pending");
-    if (error) throw error;
+    await this.orm
+      .update(messages)
+      .set({ body, transcript: body, transcriptionStatus: "ready" })
+      .where(and(eq(messages.id, messageId), eq(messages.transcriptionStatus, "pending")));
   }
 
   /** Never left stuck at pending - mirrors every other worker's safety-net
    * convention (markDocumentFailed, applyToneReviewResult's default-to-
    * flagged, markTopicCheckReviewed). */
   async markMessageTranscriptionFailed(messageId: string, reason: string): Promise<void> {
-    const { error } = await this.db
-      .from("messages")
-      .update({ transcription_status: "failed", transcription_failure_reason: reason })
-      .eq("id", messageId)
-      .eq("transcription_status", "pending");
-    if (error) throw error;
+    await this.orm
+      .update(messages)
+      .set({ transcriptionStatus: "failed", transcriptionFailureReason: reason })
+      .where(and(eq(messages.id, messageId), eq(messages.transcriptionStatus, "pending")));
   }
 
   private async findIdentityByPhone(tenantId: string, phone: string) {

@@ -34,7 +34,7 @@ export async function POST(
   }
 
   const existing = await domain.getMessageById(messageId);
-  if (!existing || existing.tenant_id !== tenant.id) {
+  if (!existing || existing.tenantId !== tenant.id) {
     return new Response("Unknown message", { status: 404 });
   }
 
