@@ -11,6 +11,9 @@ import { createDb, type Db } from "../db";
 import {
   conversations as conversationsTable,
   conversationAssignees,
+  conversationParticipants,
+  conversationTags,
+  tags,
   conversationPersonalTags,
   conversationReadStates,
   messages,
@@ -1223,26 +1226,36 @@ export class DomainService {
     );
     if (conversationIds.length === 0) return map;
 
-    const [participantsRes, tagsRes, assigneesRes] = await Promise.all([
-      this.db.from("conversation_participants").select("*").in("conversation_id", conversationIds),
-      this.db.from("conversation_tags").select("conversation_id, tags(*)").in("conversation_id", conversationIds),
-      this.db.from("conversation_assignees").select("*").in("conversation_id", conversationIds),
+    const [participantRows, tagRows, assigneeRows] = await Promise.all([
+      this.orm
+        .select()
+        .from(conversationParticipants)
+        .where(inArray(conversationParticipants.conversationId, conversationIds)),
+      // This was PostgREST's embedded select, `tags(*)`, which is a join it
+      // performs and names after the target table. As a real join the shape is
+      // explicit: an inner join drops rows whose tag was deleted, which is what
+      // the old code did too by discarding a null `tags`.
+      this.orm
+        .select({ conversationId: conversationTags.conversationId, tag: tags })
+        .from(conversationTags)
+        .innerJoin(tags, eq(tags.id, conversationTags.tagId))
+        .where(inArray(conversationTags.conversationId, conversationIds)),
+      this.orm
+        .select()
+        .from(conversationAssignees)
+        .where(inArray(conversationAssignees.conversationId, conversationIds)),
     ]);
 
-    if (participantsRes.error) throw participantsRes.error;
-    if (tagsRes.error) throw tagsRes.error;
-    if (assigneesRes.error) throw assigneesRes.error;
-
-    for (const p of (participantsRes.data ?? []) as ConversationParticipant[]) {
-      map.get(p.conversation_id)?.participants.push(p);
+    for (const p of participantRows) {
+      map.get(p.conversationId)?.participants.push(p);
     }
 
-    for (const row of (tagsRes.data ?? []) as unknown as Array<{ conversation_id: string; tags: Tag | null }>) {
-      if (row.tags) map.get(row.conversation_id)?.tags.push(row.tags);
+    for (const row of tagRows) {
+      map.get(row.conversationId)?.tags.push(row.tag);
     }
 
-    for (const a of (assigneesRes.data ?? []) as ConversationAssignee[]) {
-      map.get(a.conversation_id)?.assignees.push(a);
+    for (const a of assigneeRows) {
+      map.get(a.conversationId)?.assignees.push(a);
     }
 
     return map;
@@ -1286,20 +1299,16 @@ export class DomainService {
   // ---- Tags (Phase 2 / 2A) ----
 
   async createTag(tenantId: string, name: string, color?: string): Promise<Tag> {
-    const { data, error } = await this.db
-      .from("tags")
-      .insert({ tenant_id: tenantId, name, color: color ?? null })
-      .select("*")
-      .single();
+    const [tag] = await this.orm
+      .insert(tags)
+      .values({ tenantId, name, color: color ?? null })
+      .returning();
 
-    if (error) throw error;
-    return data;
+    return tag;
   }
 
   async listTenantTags(tenantId: string): Promise<Tag[]> {
-    const { data, error } = await this.db.from("tags").select("*").eq("tenant_id", tenantId).order("name");
-    if (error) throw error;
-    return data ?? [];
+    return this.orm.select().from(tags).where(eq(tags.tenantId, tenantId)).orderBy(asc(tags.name));
   }
 
   async addConversationTag(conversationId: string, tagId: string): Promise<void> {
@@ -1334,17 +1343,19 @@ export class DomainService {
     userId: string,
     assignedBy?: string,
   ): Promise<ConversationAssignee> {
-    const { data, error } = await this.db
-      .from("conversation_assignees")
-      .upsert(
-        { conversation_id: conversationId, user_id: userId, assigned_by: assignedBy ?? null },
-        { onConflict: "conversation_id,user_id" },
-      )
-      .select("*")
-      .single();
+    // Re-assigning someone already assigned must not fail, so the composite
+    // key conflict updates rather than raises - it also refreshes assigned_by
+    // to whoever most recently did it.
+    const [assignee] = await this.orm
+      .insert(conversationAssignees)
+      .values({ conversationId, userId, assignedBy: assignedBy ?? null })
+      .onConflictDoUpdate({
+        target: [conversationAssignees.conversationId, conversationAssignees.userId],
+        set: { assignedBy: assignedBy ?? null },
+      })
+      .returning();
 
-    if (error) throw error;
-    return data;
+    return assignee;
   }
 
   async removeConversationAssignee(conversationId: string, userId: string): Promise<void> {
@@ -1357,12 +1368,10 @@ export class DomainService {
   }
 
   async listConversationAssignees(conversationId: string): Promise<ConversationAssignee[]> {
-    const { data, error } = await this.db
-      .from("conversation_assignees")
-      .select("*")
-      .eq("conversation_id", conversationId);
-    if (error) throw error;
-    return data ?? [];
+    return this.orm
+      .select()
+      .from(conversationAssignees)
+      .where(eq(conversationAssignees.conversationId, conversationId));
   }
 
   // ---- Personal tags (Reside dashboard viewer relevance) — a lighter-weight
@@ -1568,19 +1577,17 @@ export class DomainService {
     participant: { identityId: string } | { userId: string },
   ): Promise<ConversationParticipant> {
     const isIdentity = "identityId" in participant;
-    const { data, error } = await this.db
-      .from("conversation_participants")
-      .insert({
-        conversation_id: conversationId,
-        identity_id: isIdentity ? participant.identityId : null,
-        user_id: isIdentity ? null : participant.userId,
+    const [row] = await this.orm
+      .insert(conversationParticipants)
+      .values({
+        conversationId,
+        identityId: isIdentity ? participant.identityId : null,
+        userId: isIdentity ? null : participant.userId,
         role: isIdentity ? "external" : "internal",
       })
-      .select("*")
-      .single();
+      .returning();
 
-    if (error) throw error;
-    return data;
+    return row;
   }
 
   async removeConversationParticipant(conversationId: string, participantId: string): Promise<void> {
@@ -1593,12 +1600,10 @@ export class DomainService {
   }
 
   async listConversationParticipants(conversationId: string): Promise<ConversationParticipant[]> {
-    const { data, error } = await this.db
-      .from("conversation_participants")
-      .select("*")
-      .eq("conversation_id", conversationId);
-    if (error) throw error;
-    return data ?? [];
+    return this.orm
+      .select()
+      .from(conversationParticipants)
+      .where(eq(conversationParticipants.conversationId, conversationId));
   }
 
   // ---- Conversation merging (Phase 7) — admin-triggered, closes the real

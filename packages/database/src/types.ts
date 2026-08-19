@@ -1,4 +1,11 @@
-import { conversationReadStates, outboundBatches, outboundBatchRecipients } from "./schema";
+import {
+  conversationAssignees,
+  conversationParticipants,
+  conversationReadStates,
+  outboundBatches,
+  outboundBatchRecipients,
+  tags,
+} from "./schema";
 export type Json =
   | string
   | number
@@ -655,14 +662,14 @@ export type IdentityConversionLog = IdentityConversionLogRow;
  */
 export type OutboundBatch = typeof outboundBatches.$inferSelect;
 export type OutboundBatchRecipient = typeof outboundBatchRecipients.$inferSelect;
-export type Tag = TagRow;
-export type ConversationAssignee = ConversationAssigneeRow;
+export type Tag = typeof tags.$inferSelect;
+export type ConversationAssignee = typeof conversationAssignees.$inferSelect;
 /** Inferred from the Drizzle schema - camelCase - now that
  * markConversationRead is converted. See the OutboundBatch note above for why
  * these are retyped rather than mapped back. */
 export type ConversationReadState = typeof conversationReadStates.$inferSelect;
 export type ConversationPersonalTag = ConversationPersonalTagRow;
-export type ConversationParticipant = ConversationParticipantRow;
+export type ConversationParticipant = typeof conversationParticipants.$inferSelect;
 export type Document = DocumentRow;
 export type DocumentChunk = DocumentChunkRow;
 

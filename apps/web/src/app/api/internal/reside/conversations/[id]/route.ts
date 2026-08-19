@@ -25,7 +25,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // admin id it resolves to, so reside can match against its own admin list
   // and display a real name.
   const resideUserIdByUserId = await findResideUserIdsForUsers(
-    guard.conversation.assignees.map((a) => a.user_id),
+    guard.conversation.assignees.map((a) => a.userId),
   );
 
   // Phase 9: "how did this conversation come to exist via a split, if it
@@ -37,7 +37,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     ...guard.conversation,
     assignees: guard.conversation.assignees.map((a) => ({
       ...a,
-      reside_user_id: resideUserIdByUserId.get(a.user_id) ?? null,
+      reside_user_id: resideUserIdByUserId.get(a.userId) ?? null,
     })),
     splitOrigin,
   };
