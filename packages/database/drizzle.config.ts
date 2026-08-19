@@ -1,4 +1,18 @@
+import { config as loadEnv } from "dotenv";
 import { defineConfig } from "drizzle-kit";
+
+// drizzle-kit runs outside both apps, so nothing loads env for it: Next.js
+// reads apps/web/.env.local itself at runtime, and the bridge does its own.
+// Without this, MIGRATION_DATABASE_URL is simply undefined here and drizzle-kit
+// reports a connection error rather than a missing variable.
+//
+// apps/web/.env.local first because that is where this project already keeps
+// its Postgres credentials; the repo root is the conventional spot and is
+// checked as a fallback. Neither overrides a variable already in the
+// environment, so CI and Railway keep winning over anything on disk.
+for (const path of ["../../apps/web/.env.local", "../../.env"]) {
+  loadEnv({ path: new URL(path, import.meta.url).pathname, override: false });
+}
 
 /**
  * comm-canoe owns its own logical database on a shared PlanetScale cluster;
