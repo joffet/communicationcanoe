@@ -1,4 +1,8 @@
-import { createAdminService, createDomainService } from "@communication-canoe/database";
+import {
+  createAdminService,
+  createDomainService,
+  toResideConversation,
+} from "@communication-canoe/database";
 import { CONVERSATION_STATUSES } from "@communication-canoe/shared/constants";
 import { z } from "zod";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
@@ -56,12 +60,12 @@ export async function GET(request: Request) {
   // requesting their own dashboard/inbox list who has never touched a
   // conversation simply sees viewer_is_relevant: false on everything.
   if (!viewerResideUserId) {
-    return Response.json({ conversations });
+    return Response.json({ conversations: conversations.map(toResideConversation) });
   }
   const viewerUserId = await findResideActorUserId(viewerResideUserId);
   if (!viewerUserId) {
     const unresolved = conversations.map((c) => ({
-      ...c,
+      ...toResideConversation(c),
       viewer_is_relevant: false,
       viewer_has_unread: false,
       viewer_last_read_at: null,
@@ -71,7 +75,7 @@ export async function GET(request: Request) {
 
   const viewerStates = await domain.getViewerConversationStates(conversations, viewerUserId);
   const enriched = conversations.map((c) => ({
-    ...c,
+    ...toResideConversation(c),
     ...(viewerStates.get(c.id) ?? { viewer_is_relevant: false, viewer_has_unread: false, viewer_last_read_at: null }),
   }));
 
