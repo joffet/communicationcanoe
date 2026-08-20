@@ -3,6 +3,18 @@
 // below reads them.
 import "./load-env.js";
 
+/** host/database of DATABASE_URL, credentials stripped. */
+function describeDatabaseTarget(): string {
+  const raw = process.env.DATABASE_URL;
+  if (!raw) return "DATABASE_URL is not set";
+  try {
+    const u = new URL(raw);
+    return `${u.username}@${u.host}${u.pathname}`;
+  } catch {
+    return "DATABASE_URL is set but unparseable";
+  }
+}
+
 import { createServer } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { WebSocketServer } from "ws";
@@ -102,6 +114,11 @@ server.on("upgrade", (request, socket, head) => {
 
 server.listen(config.port, () => {
   console.log(`realtime-bridge listening on http://localhost:${config.port}`);
+  // Which database, without the credential. A bridge pointed at the wrong one
+  // starts, answers /health and polls happily - the only symptom is workers
+  // finding rows that are not where you think they are. Worth a line at boot
+  // rather than a query against each candidate later.
+  console.log(`[db] ${describeDatabaseTarget()}`);
 });
 
 startOutboundBatchWorker();
