@@ -1,4 +1,4 @@
-import { createDomainService } from "@communication-canoe/database";
+import { createDomainService, toResideConversation } from "@communication-canoe/database";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
 import { resolveTenantScopedConversation } from "@/lib/reside/conversation-guard";
 
@@ -21,5 +21,5 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // (across their full identity merge-chain) as candidates for the
   // Phase 7 merge action.
   const conversations = await createDomainService().listRelatedConversations(tenantId, guard.conversation.id);
-  return Response.json({ conversations });
+  return Response.json({ conversations: conversations.map(toResideConversation) });
 }

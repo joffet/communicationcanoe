@@ -1,4 +1,8 @@
-import { createDomainService } from "@communication-canoe/database";
+import {
+  createDomainService,
+  toResideConversationBase,
+  toResideThread,
+} from "@communication-canoe/database";
 import { summarizeConversation } from "@communication-canoe/shared/ai";
 import { resideUpdateConversationStatusInputSchema } from "@communication-canoe/shared/schemas";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
@@ -34,11 +38,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const splitOrigin = await createDomainService().getConversationSplitOrigin(guard.conversation.id);
 
   const conversation = {
-    ...guard.conversation,
-    assignees: guard.conversation.assignees.map((a) => ({
-      ...a,
-      reside_user_id: resideUserIdByUserId.get(a.userId) ?? null,
-    })),
+    ...toResideThread({
+      ...guard.conversation,
+      assignees: guard.conversation.assignees.map((a) => ({
+        ...a,
+        reside_user_id: resideUserIdByUserId.get(a.userId) ?? null,
+      })),
+    }),
+    // Declared camelCase on reside's side (CommCanoeConversationSplitOrigin),
+    // unlike everything above it - passed through as-is rather than folded
+    // into the serializer, which would change a contract that is not broken.
     splitOrigin,
   };
 
@@ -64,7 +73,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   // live thread, not a dead, invisible one.
   try {
     const domain = createDomainService();
-    const conversation = await domain.updateConversationStatus(guard.conversation.id, parsed.data.status);
+    const updated = await domain.updateConversationStatus(guard.conversation.id, parsed.data.status);
+    const conversation = toResideConversationBase(updated);
 
     // Phase 10 feeder-gap fix: conversations.summary was previously only
     // ever set via comm-canoe's own internal dashboard's manual "Summarize"

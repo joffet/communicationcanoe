@@ -1,4 +1,8 @@
-import { createAdminService, createDomainService } from "@communication-canoe/database";
+import {
+  createAdminService,
+  createDomainService,
+  toResideKnowledgeDocument,
+} from "@communication-canoe/database";
 import { resideCreateKnowledgeDocumentInputSchema } from "@communication-canoe/shared/schemas";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
 
@@ -24,7 +28,7 @@ export async function GET(request: Request) {
   }
 
   const documents = await createDomainService().listDocumentsForTenant(tenant.id);
-  return Response.json({ documents });
+  return Response.json({ documents: documents.map(toResideKnowledgeDocument) });
 }
 
 export async function POST(request: Request) {

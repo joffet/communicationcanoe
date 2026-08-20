@@ -1,4 +1,4 @@
-import { createDomainService } from "@communication-canoe/database";
+import { createDomainService, toResideMessage } from "@communication-canoe/database";
 import { resideConversationReplyInputSchema } from "@communication-canoe/shared/schemas";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
 import { resolveTenantScopedConversation } from "@/lib/reside/conversation-guard";
@@ -40,7 +40,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       body,
       visibility: "internal",
     });
-    return Response.json({ message });
+    return Response.json({ message: toResideMessage(message) });
   }
 
   // External: not dispatched inline. Queued with a scheduled_send_at in the
@@ -68,5 +68,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     aiReviewStatus: "pending",
   });
 
-  return Response.json({ message, scheduledSendAt });
+  return Response.json({ message: toResideMessage(message), scheduledSendAt });
 }
