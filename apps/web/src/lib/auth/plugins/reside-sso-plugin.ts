@@ -35,6 +35,19 @@ export function resideSsoPlugin() {
             throw new APIError("UNAUTHORIZED", { message: "invalid_or_expired_token" });
           }
 
+          // claims.resideClientUid is reside's own client identifier and may be a
+          // slug like "cardiff" (see migration 20250701002000_tenant_reside_client_uid).
+          // The membership row below is keyed by a uuid FK into tenants, so the uid has
+          // to be resolved to comm-canoe's internal tenant id first - passing the uid
+          // straight through is a uuid cast error for a slug, or an FK violation for a
+          // uuid. Resolved before the user is provisioned so an unprovisioned client
+          // cannot leave a membership-less user behind.
+          const admin = createAdminService();
+          const tenant = await admin.getTenantByResideClientUid(claims.resideClientUid);
+          if (!tenant) {
+            throw new APIError("FORBIDDEN", { message: "unknown_reside_client" });
+          }
+
           let user = (await ctx.context.adapter.findOne({
             model: "user",
             where: [{ field: "resideUserId", value: claims.externalUserId }],
@@ -50,12 +63,7 @@ export function resideSsoPlugin() {
             })) as ResideAuthUser;
           }
 
-          const admin = createAdminService();
-          await admin.upsertTenantMembership(
-            user.id,
-            claims.resideClientUid,
-            mapTenantRole(claims.role),
-          );
+          await admin.upsertTenantMembership(user.id, tenant.id, mapTenantRole(claims.role));
 
           const session = await ctx.context.internalAdapter.createSession(user.id);
           if (!session) {
