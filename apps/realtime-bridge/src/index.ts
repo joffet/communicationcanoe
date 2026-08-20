@@ -1,3 +1,8 @@
+// Must stay the first import: it populates process.env from .env.local, and
+// module evaluation order is what puts those values in place before anything
+// below reads them.
+import "./load-env.js";
+
 import { createServer } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { WebSocketServer } from "ws";
