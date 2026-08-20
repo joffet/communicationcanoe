@@ -56,6 +56,14 @@ $$;
 
 GRANT CONNECT ON DATABASE comm_canoe TO comm_canoe_app;
 
+-- Connecting as this role needs a branch-qualified username: `comm_canoe_app`
+-- alone is rejected by PlanetScale's proxy before it ever reaches Postgres,
+-- with "User parameter must include branch (e.g., user.branch)" - which reads
+-- like a credentials problem and is not one. Roles PlanetScale creates get the
+-- suffix automatically; one created here in SQL does not, so the connection
+-- string needs it appended: comm_canoe_app.<branch-id>. The branch id is the
+-- same suffix the default `postgres.<id>` credential already carries.
+
 -- ── Remaining statements run while connected TO comm_canoe ───────────────
 -- \c comm_canoe
 

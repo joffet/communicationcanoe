@@ -52,7 +52,7 @@ async function notifyOverdueConversations(): Promise<void> {
       if (!tenant) continue;
 
       await notifyResideResponseOverdue({
-        resideClientUid: tenant.reside_client_uid,
+        resideClientUid: tenant.resideClientUid,
         conversationId: claimed.id,
         summary: `Response overdue for ${who}`,
       });

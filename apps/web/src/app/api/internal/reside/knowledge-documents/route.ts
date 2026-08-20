@@ -51,8 +51,8 @@ export async function POST(request: Request) {
   // cost like suggestReply/tone review).
   const domain = createDomainService();
   const settings = await domain.getTenantSettings(tenantId);
-  const maxDocuments = settings?.max_knowledge_documents ?? DEFAULT_MAX_KNOWLEDGE_DOCUMENTS;
-  const maxChunks = settings?.max_knowledge_chunks ?? DEFAULT_MAX_KNOWLEDGE_CHUNKS;
+  const maxDocuments = settings?.maxKnowledgeDocuments ?? DEFAULT_MAX_KNOWLEDGE_DOCUMENTS;
+  const maxChunks = settings?.maxKnowledgeChunks ?? DEFAULT_MAX_KNOWLEDGE_CHUNKS;
 
   const [documentCount, chunkCount] = await Promise.all([
     domain.countTenantDocuments(tenantId),

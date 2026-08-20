@@ -50,7 +50,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // tone-review-worker picks up 'pending' messages and transitions them
   // before the delay elapses.
   const settings = await domain.getTenantSettings(commCanoeTenantId);
-  const delaySeconds = settings?.external_send_delay_seconds ?? DEFAULT_EXTERNAL_SEND_DELAY_SECONDS;
+  const delaySeconds = settings?.externalSendDelaySeconds ?? DEFAULT_EXTERNAL_SEND_DELAY_SECONDS;
   const scheduledSendAt = new Date(Date.now() + delaySeconds * 1000).toISOString();
 
   // Write against the resolved canonical id (Phase 7 merge redirect).

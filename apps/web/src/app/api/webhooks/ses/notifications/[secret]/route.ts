@@ -101,7 +101,7 @@ async function recordOutcomeAndMaybeNotifyReside(
   if (!thread) return;
 
   const settings = await domain.getTenantSettings(message.tenantId);
-  const threshold = settings?.bounce_threshold ?? 3;
+  const threshold = settings?.bounceThreshold ?? 3;
 
   const { crossedThreshold, clearedFlag } = await domain.recordChannelDeliveryOutcome(
     thread.identity.id,
@@ -117,7 +117,7 @@ async function recordOutcomeAndMaybeNotifyReside(
     if (!tenant) return;
 
     await notifyResideIdentityStatus({
-      resideClientUid: tenant.reside_client_uid,
+      resideClientUid: tenant.resideClientUid,
       resideResidentId: thread.identity.resideResidentId,
       channel: "email",
       status: crossedThreshold ? "undeliverable" : "deliverable",

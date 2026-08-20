@@ -31,7 +31,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     domain.getResolvedConversationExamples(commCanoeTenantId),
   ]);
 
-  const faqRaw = settings?.faq_snippets;
+  const faqRaw = settings?.faqSnippets;
   const faqSnippets = Array.isArray(faqRaw)
     ? (faqRaw as Array<{ q?: string; a?: string }>).map((f) => ({ q: f.q ?? "", a: f.a ?? "" }))
     : [];

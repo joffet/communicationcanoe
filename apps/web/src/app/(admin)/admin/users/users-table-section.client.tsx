@@ -48,7 +48,7 @@ export function UsersTableSection({ users }: UsersTableSectionProps) {
               <TableCell className="font-medium">{user.name ?? "—"}</TableCell>
               <TableCell>{user.email}</TableCell>
               <TableCell>
-                {user.platform_role === "super_admin" ? (
+                {user.platformRole === "super_admin" ? (
                   <Badge>Super admin</Badge>
                 ) : (
                   <span className="text-zinc-500">User</span>
@@ -58,7 +58,7 @@ export function UsersTableSection({ users }: UsersTableSectionProps) {
                 {formatMembershipSummary(user)}
               </TableCell>
               <TableCell className="text-zinc-500">
-                {formatUserDate(user.created_at)}
+                {formatUserDate(user.createdAt.toISOString())}
               </TableCell>
               <TableCell>
                 <Link

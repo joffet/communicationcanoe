@@ -16,7 +16,7 @@ export function userPassesAdminFilters(
   user: AdminUserRow,
   filter: UsersFilterState,
 ): boolean {
-  const isSuper = user.platform_role === "super_admin";
+  const isSuper = user.platformRole === "super_admin";
   if (isSuper && !filter.showSuperAdmins) return false;
   if (!isSuper && !filter.showRegularUsers) return false;
 

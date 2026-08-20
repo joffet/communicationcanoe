@@ -1,4 +1,12 @@
 import {
+  conversationPersonalTags,
+  documentChunks,
+  tenantSettings,
+  documents,
+  liveTransfers,
+  teams,
+  tenants,
+  users,
   conversations,
   identities,
   messages,
@@ -108,20 +116,7 @@ export type TenantInsert = {
   created_at?: string;
 };
 
-export type TenantSettingsRow = {
-  tenant_id: string;
-  greeting_message: string | null;
-  business_hours: Json;
-  faq_snippets: Json;
-  auto_reply_sms: boolean;
-  bounce_threshold: number;
-  external_send_delay_seconds: number;
-  default_response_window_minutes: number;
-  conversation_staleness_minutes: number;
-  max_knowledge_documents: number;
-  max_knowledge_chunks: number;
-  updated_at: string;
-};
+export type TenantSettingsRow = typeof tenantSettings.$inferSelect;
 
 export type TenantSettingsInsert = {
   tenant_id: string;
@@ -140,15 +135,10 @@ export type TenantSettingsInsert = {
 
 export type PlatformRole = "user" | "super_admin";
 
-export type UserRow = {
-  id: string;
-  name: string | null;
-  email: string;
-  phone_number: string | null;
-  available_for_calls: boolean;
-  platform_role: PlatformRole;
-  created_at: string;
-};
+/** Inferred from the Drizzle schema, now that the admin service is converted.
+ * The hand-written snake_case shape it replaces was the last row type in this
+ * file not derived from the schema it describes. */
+export type UserRow = typeof users.$inferSelect;
 
 export type UserInsert = {
   id: string;
@@ -630,20 +620,11 @@ export type DocumentChunkRow = {
   created_at: string;
 };
 
-export type DocumentChunkInsert = {
-  id?: string;
-  document_id: string;
-  tenant_id: string;
-  chunk_index: number;
-  heading?: string | null;
-  content: string;
-  embedding?: number[] | null;
-  created_at?: string;
-};
+export type DocumentChunkInsert = typeof documentChunks.$inferInsert;
 
 export type Tables<T extends keyof DatabaseTables> = DatabaseTables[T]["Row"];
 
-export type Tenant = TenantRow;
+export type Tenant = typeof tenants.$inferSelect;
 /** Inferred from the Drizzle schema. */
 export type Identity = typeof identities.$inferSelect;
 /** Inferred from the Drizzle schema. With this, ConversationWithIdentity and
@@ -652,8 +633,8 @@ export type Identity = typeof identities.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;
 /** Inferred from the Drizzle schema. */
 export type Message = typeof messages.$inferSelect;
-export type Team = TeamRow;
-export type LiveTransfer = LiveTransferRow;
+export type Team = typeof teams.$inferSelect;
+export type LiveTransfer = typeof liveTransfers.$inferSelect;
 export type IdentityConversionLog = IdentityConversionLogRow;
 /**
  * Now inferred from the Drizzle schema rather than aliased to the generated
@@ -676,9 +657,9 @@ export type ConversationAssignee = typeof conversationAssignees.$inferSelect;
  * markConversationRead is converted. See the OutboundBatch note above for why
  * these are retyped rather than mapped back. */
 export type ConversationReadState = typeof conversationReadStates.$inferSelect;
-export type ConversationPersonalTag = ConversationPersonalTagRow;
+export type ConversationPersonalTag = typeof conversationPersonalTags.$inferSelect;
 export type ConversationParticipant = typeof conversationParticipants.$inferSelect;
-export type Document = DocumentRow;
+export type Document = typeof documents.$inferSelect;
 export type DocumentChunk = DocumentChunkRow;
 
 /** Everyone else on the thread besides the primary `identity`/`assigned_user_id`

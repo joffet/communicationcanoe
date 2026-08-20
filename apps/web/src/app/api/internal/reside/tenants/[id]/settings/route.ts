@@ -22,17 +22,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
 
   const settings = await createDomainService().getTenantSettings(tenant.id);
-  const faqRaw = settings?.faq_snippets;
+  const faqRaw = settings?.faqSnippets;
   const faqSnippets = Array.isArray(faqRaw)
     ? (faqRaw as Array<{ q?: string; a?: string }>).map((f) => ({ q: f.q ?? "", a: f.a ?? "" }))
     : [];
 
   return Response.json({
     settings: {
-      defaultResponseWindowMinutes: settings?.default_response_window_minutes ?? DEFAULT_RESPONSE_WINDOW_MINUTES,
-      externalSendDelaySeconds: settings?.external_send_delay_seconds ?? DEFAULT_EXTERNAL_SEND_DELAY_SECONDS,
+      defaultResponseWindowMinutes: settings?.defaultResponseWindowMinutes ?? DEFAULT_RESPONSE_WINDOW_MINUTES,
+      externalSendDelaySeconds: settings?.externalSendDelaySeconds ?? DEFAULT_EXTERNAL_SEND_DELAY_SECONDS,
       conversationStalenessMinutes:
-        settings?.conversation_staleness_minutes ?? DEFAULT_CONVERSATION_STALENESS_MINUTES,
+        settings?.conversationStalenessMinutes ?? DEFAULT_CONVERSATION_STALENESS_MINUTES,
       faqSnippets,
     },
   });
@@ -67,25 +67,25 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const settings = await createDomainService().updateTenantSettings(tenant.id, {
     ...(defaultResponseWindowMinutes !== undefined && {
-      default_response_window_minutes: defaultResponseWindowMinutes,
+      defaultResponseWindowMinutes: defaultResponseWindowMinutes,
     }),
-    ...(externalSendDelaySeconds !== undefined && { external_send_delay_seconds: externalSendDelaySeconds }),
+    ...(externalSendDelaySeconds !== undefined && { externalSendDelaySeconds: externalSendDelaySeconds }),
     ...(conversationStalenessMinutes !== undefined && {
-      conversation_staleness_minutes: conversationStalenessMinutes,
+      conversationStalenessMinutes: conversationStalenessMinutes,
     }),
-    ...(faqSnippets !== undefined && { faq_snippets: faqSnippets }),
+    ...(faqSnippets !== undefined && { faqSnippets: faqSnippets }),
   });
 
-  const faqRaw = settings.faq_snippets;
+  const faqRaw = settings.faqSnippets;
   const responseFaqSnippets = Array.isArray(faqRaw)
     ? (faqRaw as Array<{ q?: string; a?: string }>).map((f) => ({ q: f.q ?? "", a: f.a ?? "" }))
     : [];
 
   return Response.json({
     settings: {
-      defaultResponseWindowMinutes: settings.default_response_window_minutes,
-      externalSendDelaySeconds: settings.external_send_delay_seconds,
-      conversationStalenessMinutes: settings.conversation_staleness_minutes,
+      defaultResponseWindowMinutes: settings.defaultResponseWindowMinutes,
+      externalSendDelaySeconds: settings.externalSendDelaySeconds,
+      conversationStalenessMinutes: settings.conversationStalenessMinutes,
       faqSnippets: responseFaqSnippets,
     },
   });
