@@ -22,20 +22,25 @@ export async function createTenantAction(input: {
     return { ok: false as const, message: "Inbound email is required." };
   }
 
+  let tenant;
   try {
-    const tenant = await gate.admin.createTenant({
+    tenant = await gate.admin.createTenant({
       name: input.name,
       twilio_number: input.twilio_number,
       inbound_email_address: input.inbound_email_address,
     });
-    revalidatePath("/admin/tenants");
-    redirect(`/admin/tenants/${tenant.id}/edit`);
   } catch (err) {
     return {
       ok: false as const,
       message: err instanceof Error ? err.message : "Failed to create tenant.",
     };
   }
+
+  revalidatePath("/admin/tenants");
+  // Outside the catch: redirect() signals by throwing, so catching it here
+  // would swallow the navigation and surface "NEXT_REDIRECT" as a form error
+  // on a tenant that was in fact created.
+  redirect(`/admin/tenants/${tenant.id}/edit`);
 }
 
 export async function updateTenantAction(
