@@ -83,25 +83,33 @@ function normalizeEmailSubject(subject: string): string {
 
 export class DomainService {
   #orm?: Db;
+  #supabase?: AppSupabaseClient;
 
   /**
-   * Every query in this service is Drizzle now. `db` remains only for the
-   * Supabase Realtime channel used to broadcast conversation changes - a
-   * pub/sub call with no database involved, and the one thing Drizzle does not
-   * replace.
+   * Both handles are lazy, and for the same reason: nothing should pay for a
+   * connection it never uses.
    *
-   * The orm handle is lazy so a caller that only broadcasts never opens a pool,
-   * and so tests can pass a pglite instance through the second argument.
+   * Every query here is Drizzle now. Supabase remains for exactly one thing -
+   * the Realtime channel that broadcasts conversation changes, which is pub/sub
+   * with no database involved. Constructing that client eagerly meant every
+   * realtime-bridge worker tick built a Supabase client it never touched, and
+   * then died on the missing keys once the bridge stopped carrying them.
    */
   constructor(
-    private db: AppSupabaseClient,
+    supabaseOverride?: AppSupabaseClient | null,
     ormOverride?: Db,
   ) {
+    this.#supabase = supabaseOverride ?? undefined;
     this.#orm = ormOverride;
   }
 
   protected get orm(): Db {
     return (this.#orm ??= createDb());
+  }
+
+  /** Realtime broadcast only - see the constructor. */
+  protected get db(): AppSupabaseClient {
+    return (this.#supabase ??= createServiceClient());
   }
 
   async resolveTenantByPhone(phone: string): Promise<Tenant | null> {
@@ -2492,7 +2500,7 @@ export class DomainService {
 }
 
 export function createDomainService(db?: AppSupabaseClient) {
-  return new DomainService(db ?? createServiceClient());
+  return new DomainService(db);
 }
 
 export * from "./chat-session";
