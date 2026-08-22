@@ -1,4 +1,4 @@
-export type UsersSortField = "name" | "email" | "createdAt" | "platform_role";
+export type UsersSortField = "name" | "email" | "createdAt" | "platformRole";
 
 export const DEFAULT_USERS_SORT: SortConfig<UsersSortField> = {
   field: "email",
@@ -15,7 +15,7 @@ export function sortUsers(users: AdminUser[], config: SortConfig<UsersSortField>
         return (a.name ?? a.email).localeCompare(b.name ?? b.email) * dir;
       case "email":
         return a.email.localeCompare(b.email) * dir;
-      case "platform_role":
+      case "platformRole":
         return a.platformRole.localeCompare(b.platformRole) * dir;
       case "createdAt":
         return (

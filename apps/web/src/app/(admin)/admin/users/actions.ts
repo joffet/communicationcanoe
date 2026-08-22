@@ -42,9 +42,9 @@ export async function updateUserAction(
   id: string,
   input: {
     name?: string | null;
-    phone_number?: string | null;
-    available_for_calls: boolean;
-    platform_role: "user" | "super_admin";
+    phoneNumber?: string | null;
+    availableForCalls: boolean;
+    platformRole: "user" | "super_admin";
     memberships: UserMembershipInput[];
   },
 ) {
@@ -54,9 +54,9 @@ export async function updateUserAction(
   try {
     await gate.admin.updateUser(id, {
       name: input.name,
-      phone_number: input.phone_number,
-      available_for_calls: input.available_for_calls,
-      platform_role: input.platform_role,
+      phoneNumber: input.phoneNumber,
+      availableForCalls: input.availableForCalls,
+      platformRole: input.platformRole,
     });
     await gate.admin.setUserTenantMemberships(id, input.memberships);
     revalidatePath("/admin/users");

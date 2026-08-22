@@ -300,6 +300,18 @@ purely to satisfy the type, then the UI read it back. They are camelCase now,
 and the conversion is gone. Nothing in that family crosses the reside wire; it
 is comm-canoe's own `/admin` pages only.
 
+`AdminService`'s method **inputs** were the last of it: `createTenant`,
+`updateTenant`, `createAppUser` and `updateUser` all took snake_case option
+objects and converted each key to the schema's camelCase one line later. The
+reside provisioning route was the clearest case — it parses camelCase off the
+wire, converted it down to snake_case to call `createTenant`, and `createTenant`
+converted it back up to write. Three casings for one value, two of them
+invented. All camelCase now, and `createTenant`'s body is mostly shorthand.
+
+The only snake_case that stays in this area is in `lib/auth/server.ts`, where
+`platform_role` appears inside a raw SQL string. That is a column name, and
+column names are snake_case.
+
 `AppSupabaseClient` is now bare `SupabaseClient`. Four string unions
 (`MessageVisibility`, `MessageAiReviewStatus`, `MessageTopicCheckStatus`,
 `MessageTranscriptionStatus`) went too — `@communication-canoe/shared` defines

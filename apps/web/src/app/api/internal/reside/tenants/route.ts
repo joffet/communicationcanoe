@@ -55,11 +55,11 @@ export async function POST(request: Request) {
     // instead, since it may be a slug and `tenants.id` is a uuid.
     const tenant = await admin.createTenant({
       name,
-      twilio_number: twilioNumber,
-      inbound_email_address: inboundEmailAddress,
-      provisioning_source: "reside",
-      reside_client_uid: resideClientUid,
-      reside_app_url: resideAppUrl ?? null,
+      twilioNumber,
+      inboundEmailAddress,
+      provisioningSource: "reside",
+      resideClientUid,
+      resideAppUrl: resideAppUrl ?? null,
     });
     return Response.json({ tenant: serializeTenant(tenant) });
   } catch (error) {

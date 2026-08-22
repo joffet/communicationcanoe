@@ -28,7 +28,7 @@ const SORT_OPTIONS: { value: UsersSortField; label: string }[] = [
   { value: "email", label: "Email" },
   { value: "name", label: "Name" },
   { value: "createdAt", label: "Created" },
-  { value: "platform_role", label: "Role" },
+  { value: "platformRole", label: "Role" },
 ];
 
 export function UsersToolbar({

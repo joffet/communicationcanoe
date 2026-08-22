@@ -6,8 +6,8 @@ import { requireSuperAdminAction } from "@/lib/auth/access";
 
 export async function createTenantAction(input: {
   name: string;
-  twilio_number: string;
-  inbound_email_address: string;
+  twilioNumber: string;
+  inboundEmailAddress: string;
 }) {
   const gate = await requireSuperAdminAction();
   if (!gate.ok) return { ok: false as const, message: gate.message };
@@ -15,20 +15,16 @@ export async function createTenantAction(input: {
   if (!input.name.trim()) {
     return { ok: false as const, message: "Name is required." };
   }
-  if (!input.twilio_number.trim()) {
+  if (!input.twilioNumber.trim()) {
     return { ok: false as const, message: "Twilio number is required." };
   }
-  if (!input.inbound_email_address.trim()) {
+  if (!input.inboundEmailAddress.trim()) {
     return { ok: false as const, message: "Inbound email is required." };
   }
 
   let tenant;
   try {
-    tenant = await gate.admin.createTenant({
-      name: input.name,
-      twilio_number: input.twilio_number,
-      inbound_email_address: input.inbound_email_address,
-    });
+    tenant = await gate.admin.createTenant(input);
   } catch (err) {
     return {
       ok: false as const,
@@ -47,8 +43,8 @@ export async function updateTenantAction(
   id: string,
   input: {
     name: string;
-    twilio_number: string;
-    inbound_email_address: string;
+    twilioNumber: string;
+    inboundEmailAddress: string;
   },
 ) {
   const gate = await requireSuperAdminAction();

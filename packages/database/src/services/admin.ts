@@ -99,18 +99,18 @@ export class AdminService {
   async createTenant(input: {
     id?: string;
     name: string;
-    twilio_number: string;
-    inbound_email_address: string;
-    provisioning_source?: "manual" | "reside";
+    twilioNumber: string;
+    inboundEmailAddress: string;
+    provisioningSource?: "manual" | "reside";
     /** reside's client uid. Defaults to `id` only for manually-created tenants
      * that predate the split; reside-provisioned tenants always pass it. */
-    reside_client_uid?: string;
-    reside_app_url?: string | null;
+    resideClientUid?: string;
+    resideAppUrl?: string | null;
   }): Promise<Tenant> {
-    const twilio_number = normalizePhone(input.twilio_number);
-    const inbound_email_address = normalizeEmail(input.inbound_email_address);
+    const twilioNumber = normalizePhone(input.twilioNumber);
+    const inboundEmailAddress = normalizeEmail(input.inboundEmailAddress);
     const id = input.id ?? randomUUID();
-    const reside_client_uid = input.reside_client_uid ?? id;
+    const resideClientUid = input.resideClientUid ?? id;
 
     // One transaction: a tenant with no settings row is a tenant whose SLA
     // window and greeting read as undefined everywhere downstream.
@@ -120,13 +120,13 @@ export class AdminService {
         .values({
           id,
           name: input.name.trim(),
-          twilioNumber: twilio_number,
-          inboundEmailAddress: inbound_email_address,
+          twilioNumber,
+          inboundEmailAddress,
           // NOT NULL with no database default, so it has to be supplied here.
           chatWidgetKey: generateWidgetKey(),
-          provisioningSource: input.provisioning_source ?? "manual",
-          resideClientUid: reside_client_uid,
-          resideAppUrl: input.reside_app_url ?? null,
+          provisioningSource: input.provisioningSource ?? "manual",
+          resideClientUid,
+          resideAppUrl: input.resideAppUrl ?? null,
         })
         .returning();
 
@@ -146,16 +146,16 @@ export class AdminService {
     id: string,
     input: {
       name: string;
-      twilio_number: string;
-      inbound_email_address: string;
+      twilioNumber: string;
+      inboundEmailAddress: string;
     },
   ): Promise<Tenant> {
     const [tenant] = await this.orm
       .update(tenants)
       .set({
         name: input.name.trim(),
-        twilioNumber: normalizePhone(input.twilio_number),
-        inboundEmailAddress: normalizeEmail(input.inbound_email_address),
+        twilioNumber: normalizePhone(input.twilioNumber),
+        inboundEmailAddress: normalizeEmail(input.inboundEmailAddress),
       })
       .where(eq(tenants.id, id))
       .returning();
@@ -219,7 +219,7 @@ export class AdminService {
     id: string;
     email: string;
     name?: string | null;
-    platform_role?: PlatformRole;
+    platformRole?: PlatformRole;
   }): Promise<User> {
     const [user] = await this.orm
       .insert(users)
@@ -227,7 +227,7 @@ export class AdminService {
         id: input.id,
         email: normalizeEmail(input.email),
         name: input.name?.trim() || null,
-        platformRole: input.platform_role ?? "user",
+        platformRole: input.platformRole ?? "user",
       })
       .returning();
     return user;
@@ -237,9 +237,9 @@ export class AdminService {
     id: string,
     input: {
       name?: string | null;
-      phone_number?: string | null;
-      available_for_calls?: boolean;
-      platform_role?: PlatformRole;
+      phoneNumber?: string | null;
+      availableForCalls?: boolean;
+      platformRole?: PlatformRole;
     },
   ): Promise<User> {
     // Built key by key rather than spread: an undefined field must mean "leave
@@ -251,14 +251,14 @@ export class AdminService {
       platformRole: PlatformRole;
     }> = {};
     if (input.name !== undefined) patch.name = input.name?.trim() || null;
-    if (input.phone_number !== undefined) {
-      patch.phoneNumber = input.phone_number?.trim() || null;
+    if (input.phoneNumber !== undefined) {
+      patch.phoneNumber = input.phoneNumber?.trim() || null;
     }
-    if (input.available_for_calls !== undefined) {
-      patch.availableForCalls = input.available_for_calls;
+    if (input.availableForCalls !== undefined) {
+      patch.availableForCalls = input.availableForCalls;
     }
-    if (input.platform_role !== undefined) {
-      patch.platformRole = input.platform_role;
+    if (input.platformRole !== undefined) {
+      patch.platformRole = input.platformRole;
     }
 
     const [user] = await this.orm

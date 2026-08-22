@@ -84,9 +84,9 @@ export function UserForm({ user, tenants }: UserFormProps) {
     if (isEdit && user) {
       const result = await updateUserAction(user.id, {
         name: name.trim() || null,
-        phone_number: phoneNumber.trim() || null,
-        available_for_calls: availableForCalls,
-        platform_role: platformRole,
+        phoneNumber: phoneNumber.trim() || null,
+        availableForCalls,
+        platformRole,
         memberships,
       });
       setBusy(false);

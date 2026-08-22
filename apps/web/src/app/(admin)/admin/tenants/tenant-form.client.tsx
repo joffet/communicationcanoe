@@ -39,8 +39,8 @@ export function TenantForm({ tenant }: TenantFormProps) {
 
     const payload = {
       name,
-      twilio_number: twilioNumber,
-      inbound_email_address: inboundEmail,
+      twilioNumber,
+      inboundEmailAddress: inboundEmail,
     };
 
     if (isEdit && tenant) {
