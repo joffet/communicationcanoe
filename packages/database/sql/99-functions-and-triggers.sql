@@ -90,10 +90,11 @@ END;
 $$;
 
 -- Brute-force cosine similarity search, scoped by tenant_id. Deliberately no
--- HNSW/IVFFlat index behind this (see cc-schema.ts's document_chunks
--- comment) — an approximate index can silently under-return a small
--- tenant's results once a larger tenant has loaded many chunks, which this
--- feature would never surface as an error. Called via
+-- HNSW/IVFFlat index behind this (see the document_chunks comment in
+-- src/schema/index.ts, and src/schema/notes.md section 5) — an approximate
+-- index can silently under-return a small tenant's results once a larger
+-- tenant has loaded many chunks, which this feature would never surface as an
+-- error. Called via
 -- `.rpc("match_document_chunks", ...)`.
 CREATE OR REPLACE FUNCTION match_document_chunks(
   p_tenant_id UUID,
@@ -161,9 +162,10 @@ CREATE TRIGGER messages_update_conversation_response_due_at
   EXECUTE FUNCTION update_conversation_response_due_at();
 
 -- Non-bypassable guard that a chunk's tenant_id can never drift from its
--- parent document's — RLS on document_chunks is decorative for backend code
--- (the service role bypasses it entirely), so this trigger is the only real
--- enforcement. Required by the task explicitly. (20250701001500)
+-- parent document's. The RLS that used to sit alongside it was decorative for
+-- backend code paths (the service role bypassed it entirely) and is gone
+-- since the cutover, so this trigger is now the only enforcement that
+-- application code cannot skip. (20250701001500)
 CREATE OR REPLACE FUNCTION assert_chunk_tenant_matches_document()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
