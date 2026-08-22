@@ -215,24 +215,6 @@ export class AdminService {
     return user ?? null;
   }
 
-  async createAppUser(input: {
-    id: string;
-    email: string;
-    name?: string | null;
-    platformRole?: PlatformRole;
-  }): Promise<User> {
-    const [user] = await this.orm
-      .insert(users)
-      .values({
-        id: input.id,
-        email: normalizeEmail(input.email),
-        name: input.name?.trim() || null,
-        platformRole: input.platformRole ?? "user",
-      })
-      .returning();
-    return user;
-  }
-
   async updateUser(
     id: string,
     input: {

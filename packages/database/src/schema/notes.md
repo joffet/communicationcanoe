@@ -301,8 +301,8 @@ and the conversion is gone. Nothing in that family crosses the reside wire; it
 is comm-canoe's own `/admin` pages only.
 
 `AdminService`'s method **inputs** were the last of it: `createTenant`,
-`updateTenant`, `createAppUser` and `updateUser` all took snake_case option
-objects and converted each key to the schema's camelCase one line later. The
+`updateTenant` and `updateUser` all took snake_case option objects and
+converted each key to the schema's camelCase one line later. The
 reside provisioning route was the clearest case — it parses camelCase off the
 wire, converted it down to snake_case to call `createTenant`, and `createTenant`
 converted it back up to write. Three casings for one value, two of them
