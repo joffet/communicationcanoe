@@ -5,8 +5,8 @@
 // applying every CREATE/ALTER/DROP in sequence, cross-checked against
 // packages/database/src/types.ts. This file represents ONLY the end state —
 // renamed/altered/dropped objects from migration history do not appear (see
-// cc-schema-notes.md for the full list of what was collapsed away, and for
-// every discrepancy found between the migrations and types.ts).
+// notes.md for the full list of what was collapsed away, and for every
+// discrepancy found between the migrations and types.ts).
 //
 // NOT included here (see notes.md for why):
 //   - better-auth tables ("user", "session", "account", "verification") —
@@ -14,13 +14,14 @@
 //     tables in this database's `public` schema, and are excluded from
 //     drizzle-kit's diff by tablesFilter in drizzle.config.ts.
 //   - RLS policies — inert under Better Auth (they all read auth.uid(), which
-//     Supabase Auth no longer supplies), and superseded by the schema-level
-//     superseded by the isolation the bootstrap migration sets up (comm-canoe
-//     and reside are separate logical databases on one cluster, and neither
-//     role can CONNECT to the other's; tenant isolation *within* comm-canoe is
-//     application-layer only, with no RLS backstop). Full
-//     policy inventory is in notes.md so tenant-scoping behavior can be
-//     reimplemented in application code/tests.
+//     Supabase Auth no longer supplies) and bypassed regardless by the
+//     migration role's BYPASSRLS. What replaces them is split: isolation
+//     BETWEEN products comes from the bootstrap SQL, which puts comm-canoe and
+//     reside in separate logical databases on one cluster with neither role
+//     holding CONNECT on the other's; isolation BETWEEN TENANTS within
+//     comm-canoe is application-layer only, with no backstop underneath it,
+//     and src/services/tenant-isolation.test.ts is what the cutover traded the
+//     policies for.
 //   - get_user_tenant_ids() and the RLS-auto-enable event trigger — purely
 //     RLS-support plumbing with no application code path (see notes.md).
 //
@@ -34,11 +35,14 @@
 // two products deliberately coupled only by reside's client uid.
 //
 // Naming convention: TS fields are camelCase; every column is given an
-// EXPLICIT snake_case db name (rather than relying on drizzle's
-// `casing: "snake_case"` option, which packages/database/src/db.ts sets for
-// the runtime `drizzle()` client but packages/database/drizzle.config.ts does
-// NOT set for drizzle-kit) — see notes.md, "Naming convention / casing gap"
-// section for why relying on the implicit option would be unsafe here.
+// EXPLICIT snake_case db name rather than relying on drizzle's
+// `casing: "snake_case"` option. Both consumers do set that option today
+// (packages/database/src/db.ts for the runtime client, drizzle.config.ts for
+// drizzle-kit), but they set it independently, and if the two ever disagree
+// the generated DDL and the ORM's queries silently describe different
+// columns. Writing every name out makes the option a safety net rather than
+// the only thing holding it together — see notes.md, "Naming convention /
+// casing gap".
 
 import { sql } from "drizzle-orm";
 import {
@@ -60,9 +64,11 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * comm-canoe's private schema on the shared PlanetScale cluster (see
- * packages/database/drizzle/0000_bootstrap_schema_and_role.sql). reside owns
- * a sibling `reside` schema; there is deliberately no cross-schema FK.
+ * Everything below lives in `public`, inside comm-canoe's own logical database
+ * on the shared PlanetScale cluster (see
+ * packages/database/sql/00-bootstrap-database-and-role.sql). reside owns a
+ * sibling database, not a sibling schema, so a cross-product FK is not merely
+ * absent by convention — Postgres cannot express one across databases.
  */
 
 // ---------------------------------------------------------------------------
@@ -71,7 +77,8 @@ import {
 // Values reflect the final state after every `ALTER TYPE ... ADD VALUE` was
 // applied. One type was renamed in-place (call_transfer_outcome ->
 // live_transfer_outcome); the Postgres type — and therefore this enum —
-// carries only the final name. All enums live in the comm_canoe schema.
+// carries only the final name. All enums live in `public`, like everything
+// else here.
 // ---------------------------------------------------------------------------
 
 /** 20250620160000 (created) + 20250701001200 (added 'merged') */
@@ -181,9 +188,10 @@ export const tenants = pgTable(
     inboundEmailAddress: text("inbound_email_address").notNull(),
     /**
      * 20250621140000: added nullable, backfilled with gen_random_uuid()::text,
-     * then SET NOT NULL. No DB-level DEFAULT was ever attached — see
-     * notes.md discrepancy #1 (types.ts marks this optional on insert; the
-     * DB will reject an insert that omits it).
+     * then SET NOT NULL. No DB-level DEFAULT was ever attached, so every
+     * insert must supply a key — createTenant does, via generateWidgetKey().
+     * types.ts marked this optional on insert until notes.md discrepancy #1
+     * was fixed; do not add a DEFAULT here to make it optional again.
      */
     chatWidgetKey: text("chat_widget_key").notNull(),
     /** 20250625090000 */
@@ -997,10 +1005,11 @@ export const documents = pgTable(
  * tenant_id is denormalized from documents (always derived server-side from
  * the parent document at insert time, never accepted as pass-through input)
  * so retrieval queries can filter by it directly without a join. The
- * document_chunks_tenant_check trigger (see cc-schema-notes.md's companion
- * SQL) is what actually guarantees the two never drift apart — RLS on this
- * table is decorative for backend code paths, since the service role
- * bypasses it entirely.
+ * document_chunks_tenant_check trigger (packages/database/sql/99-functions-and-triggers.sql)
+ * is what actually guarantees the two never drift apart, and it is the only
+ * tenant guard here that application code cannot skip. The RLS that used to
+ * sit alongside it was decorative for backend code paths — the service role
+ * bypassed it entirely — and is gone; see notes.md §3.
  *
  * `embedding` deliberately has NO HNSW/IVFFlat index. HNSW is approximate,
  * and `WHERE tenant_id = X ORDER BY embedding <=> $1 LIMIT k` can find the
@@ -1013,13 +1022,12 @@ export const documents = pgTable(
  * construction. Do not add a vector index here without a dedicated
  * cross-tenant completeness test alongside it (20250701001500).
  *
- * Schema-qualification risk: the bootstrap migration installs `vector` into
- * its own `extensions` schema and only sets `search_path = comm_canoe,
- * extensions` for the `comm_canoe_app` runtime role — not for whatever admin
- * role actually runs drizzle-kit migrations. If that role's search_path
- * doesn't also include `extensions`, `CREATE TABLE ... embedding
- * vector(1536)` will fail to resolve the type name at migration-apply time.
- * See notes.md.
+ * The unqualified `vector(1536)` type name resolves because the bootstrap SQL
+ * installs the extension into `public`, which is on the default search_path
+ * for every role — including whichever one drizzle-kit connects as. Installing
+ * it into a separate `extensions` schema instead would break migration-apply
+ * here unless that schema were added to the migration role's search_path too.
+ * See notes.md §5.
  */
 export const documentChunks = pgTable(
   "document_chunks",

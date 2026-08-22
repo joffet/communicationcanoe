@@ -17,7 +17,7 @@ import {
 } from "./users.utils";
 
 type UsersTableSectionProps = {
-  users: AdminUserRow[];
+  users: AdminUser[];
 };
 
 export function UsersTableSection({ users }: UsersTableSectionProps) {

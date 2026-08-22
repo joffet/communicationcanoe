@@ -52,7 +52,7 @@ export async function invitePlatformUser(input: {
   }
 
   if (input.platformRole && input.platformRole !== "user") {
-    await admin.updateUser(userId, { platform_role: input.platformRole });
+    await admin.updateUser(userId, { platformRole: input.platformRole });
   } else if (input.name?.trim()) {
     await admin.updateUser(userId, { name: input.name.trim() });
   }

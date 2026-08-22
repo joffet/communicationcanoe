@@ -27,8 +27,8 @@ type UsersToolbarProps = {
 const SORT_OPTIONS: { value: UsersSortField; label: string }[] = [
   { value: "email", label: "Email" },
   { value: "name", label: "Name" },
-  { value: "created_at", label: "Created" },
-  { value: "platform_role", label: "Role" },
+  { value: "createdAt", label: "Created" },
+  { value: "platformRole", label: "Role" },
 ];
 
 export function UsersToolbar({

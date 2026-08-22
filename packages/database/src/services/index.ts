@@ -51,17 +51,17 @@ import type {
   ConversationViewerState,
   ConversationWithIdentity,
   Document,
-  DocumentChunkInsert,
   Identity,
   LiveTransfer,
   Message,
   MessageDeliveryStatus,
+  NewDocumentChunk,
   OutboundBatch,
   OutboundBatchRecipient,
   Tag,
   Team,
   Tenant,
-  TenantSettingsRow,
+  TenantSettings,
 } from "../types";
 
 /** Strips repeated Re:/Fwd:/FW: prefixes and normalizes whitespace/case, so
@@ -2197,8 +2197,8 @@ export class DomainService {
    * setter in this codebase. */
   async updateTenantSettings(
     tenantId: string,
-    patch: Partial<Omit<TenantSettingsRow, "tenant_id" | "updated_at">>,
-  ): Promise<TenantSettingsRow> {
+    patch: Partial<Omit<TenantSettings, "tenantId" | "updatedAt">>,
+  ): Promise<TenantSettings> {
     const [settings] = await this.orm
       .insert(tenantSettings)
       .values({ tenantId, ...patch, updatedAt: new Date() })
@@ -2323,7 +2323,7 @@ export class DomainService {
     return claimed ?? null;
   }
 
-  async insertDocumentChunks(chunks: DocumentChunkInsert[]): Promise<void> {
+  async insertDocumentChunks(chunks: NewDocumentChunk[]): Promise<void> {
     if (chunks.length === 0) return;
     await this.orm.insert(documentChunks).values(chunks);
   }

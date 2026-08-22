@@ -77,7 +77,7 @@ VALUES ('YOUR_USER_ID', '11111111-1111-1111-1111-111111111111', 'admin');
 
 Magic links send from `info@communicationcanoe.com` by default. Tenant-scoped outbound email uses each tenant's `inbound_email_address` when available (must be verified in SES).
 
-**Tenant isolation** is enforced in application code: every dashboard/API route verifies session + `user_tenant_memberships` before querying with an explicit `tenant_id`. Postgres RLS remains as a future backstop.
+**Tenant isolation** is enforced in application code and nowhere else: every dashboard/API route verifies session + `user_tenant_memberships` before querying with an explicit `tenant_id`. There is no RLS backstop — the Supabase policies keyed off `auth.uid()` and were dropped at the cutover rather than ported, so each `WHERE tenant_id = $1` *is* the boundary. [tenant-isolation.test.ts](packages/database/src/services/tenant-isolation.test.ts) is what replaced them; new service methods need a case there.
 
 ## Super Admin and Platform Admin
 
@@ -150,4 +150,7 @@ When adding a user from admin, the **Send sign-in email** toggle (default on) se
 
 ## Out of Scope (This Milestone)
 
-RLS backstop via session variables, async voicemail.
+Both former entries here are settled. The RLS backstop via session variables
+was decided against rather than deferred — see Tenant Isolation above. Async
+voicemail shipped: `apps/realtime-bridge/src/workers/voicemail-transcription-worker.ts`
+plus the Twilio `voice` and `recording-status` webhooks.

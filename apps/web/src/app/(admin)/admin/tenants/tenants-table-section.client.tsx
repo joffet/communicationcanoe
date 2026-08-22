@@ -13,7 +13,7 @@ import { adminTableClassName } from "@/components/admin/admin-table-layout";
 import { formatTenantDate } from "./tenants.utils";
 
 type TenantsTableSectionProps = {
-  tenants: AdminTenantRow[];
+  tenants: AdminTenant[];
 };
 
 export function TenantsTableSection({ tenants }: TenantsTableSectionProps) {
@@ -44,7 +44,7 @@ export function TenantsTableSection({ tenants }: TenantsTableSectionProps) {
               <TableCell className="font-medium">{tenant.name}</TableCell>
               <TableCell className="font-mono text-xs">{tenant.twilioNumber}</TableCell>
               <TableCell className="text-xs">{tenant.inboundEmailAddress}</TableCell>
-              <TableCell>{tenant.member_count}</TableCell>
+              <TableCell>{tenant.memberCount}</TableCell>
               <TableCell className="text-zinc-500">
                 {formatTenantDate(tenant.createdAt.toISOString())}
               </TableCell>

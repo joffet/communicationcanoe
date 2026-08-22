@@ -1,4 +1,4 @@
-export type TenantsSortField = "name" | "created_at" | "member_count";
+export type TenantsSortField = "name" | "createdAt" | "memberCount";
 
 export const DEFAULT_TENANTS_SORT: SortConfig<TenantsSortField> = {
   field: "name",
@@ -6,9 +6,9 @@ export const DEFAULT_TENANTS_SORT: SortConfig<TenantsSortField> = {
 };
 
 export function sortTenants(
-  tenants: AdminTenantRow[],
+  tenants: AdminTenant[],
   config: SortConfig<TenantsSortField>,
-): AdminTenantRow[] {
+): AdminTenant[] {
   const sorted = [...tenants];
   const dir = config.direction === "asc" ? 1 : -1;
 
@@ -16,9 +16,9 @@ export function sortTenants(
     switch (config.field) {
       case "name":
         return a.name.localeCompare(b.name) * dir;
-      case "member_count":
-        return (a.member_count - b.member_count) * dir;
-      case "created_at":
+      case "memberCount":
+        return (a.memberCount - b.memberCount) * dir;
+      case "createdAt":
         return (
           (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) *
           dir
@@ -31,7 +31,7 @@ export function sortTenants(
   return sorted;
 }
 
-export function tenantMatchesSearch(tenant: AdminTenantRow, query: string): boolean {
+export function tenantMatchesSearch(tenant: AdminTenant, query: string): boolean {
   const q = query.toLowerCase();
   return (
     tenant.name.toLowerCase().includes(q) ||

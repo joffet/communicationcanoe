@@ -2,6 +2,13 @@
 
 Multi-tenant service for managing customer enquiries across voice, SMS, email, and embeddable web chat, with AI-assisted routing, summarization, and a real-time conversational AI capable of live transfer to a human on both voice calls and chats.
 
+> **Superseded in part (2026-08-22).** Section 2 records decisions as they were
+> made and is not edited in place. Two of them no longer hold: the database
+> moved from Supabase Postgres to PlanetScale Postgres with Drizzle ORM, and
+> RLS-as-backstop was dropped rather than implemented. See the note under
+> section 2. Sections 3, 4, 6 and 9 describe the system as it is now and have
+> been corrected.
+
 ---
 
 ## 1. Core Concepts
@@ -35,6 +42,26 @@ Multi-tenant service for managing customer enquiries across voice, SMS, email, a
 | Web chat AI engine                  | OpenAI Realtime API, text-only mode — same session infra as voice                                                             | Shares the AI's reasoning/personality/tools and the transfer-to-human pattern across voice and chat rather than maintaining two separate AI implementations                                                                                                                                                             |
 | Web chat transport                  | Browser WebSocket, hosted on the existing bridge service                                                                      | Bidirectional, low-latency, reuses a WS server that already exists rather than introducing SSE/long-polling as a second transport pattern                                                                                                                                                                               |
 | Web chat live transfer              | Human joins via the same dashboard inbox UI, gets a live indicator, types directly into the conversation                      | No separate "takeover" view needed; the inbox becomes the live interface when a chat needs a human                                                                                                                                                                                                                      |
+
+**Superseded decisions.** The rows above are left as written — they record what
+was decided and why at the time. What changed since:
+
+- **Database → PlanetScale Postgres + Drizzle ORM** (2026-08-19 → 2026-08-22,
+  PRs #2–#15). Both halves of the original rationale had already lapsed: RLS
+  was inert, and Supabase's realtime was the only part of the platform still
+  being used. comm-canoe now owns a logical database on a shared PlanetScale
+  cluster, with reside in a sibling database that its role cannot `CONNECT` to.
+  The schema source of truth is `packages/database/src/schema/index.ts`;
+  `supabase/migrations/` is frozen history.
+- **Supabase is still a live dependency, for Realtime pub/sub only** —
+  `@supabase/supabase-js` against the hosted project. Live inbox updates,
+  presence, and "chat needs a human" notifications all still run on it, so the
+  Realtime arrows in section 3 are unchanged.
+- **RLS-as-backstop was dropped, not deferred.** The policies keyed off
+  `auth.uid()`, which this app stopped supplying when it adopted Better Auth,
+  and the connection role carries `BYPASSRLS` regardless. They were never
+  ported. `packages/database/src/services/tenant-isolation.test.ts` is what the
+  cutover traded them for.
 
 ---
 
@@ -75,23 +102,34 @@ Multi-tenant service for managing customer enquiries across voice, SMS, email, a
                                └───────────────────────────────────┬───────────────────┘
                                                                    ▼
                               ┌──────────────────────────────────┐
-                              │         SUPABASE (Postgres)        │
+                              │      PLANETSCALE (Postgres)        │
                               │  - tenants, identities,             │
                               │    conversations, messages           │
                               │  - teams, users, memberships          │
-                              │  - RLS scoped by tenant_id (backstop)   │
-                              │  - Realtime: live inbox, presence,        │
-                              │    live-chat-needs-human notifications     │
-                              │  (Auth lives in Next.js app via             │
-                              │   Better Auth, not Supabase)                 │
+                              │  - No RLS: tenant_id predicates in     │
+                              │    service methods are the boundary     │
+                              │  (Auth lives in Next.js app via          │
+                              │   Better Auth; better-auth owns its       │
+                              │   own tables in this same database)        │
                               └──────────────────────────────────┘
-                                               ▲
-                                               │ inbound email
+
                               ┌──────────────────────────────────┐
                               │  POSTMARK / SENDGRID                │
                               │  - One inbound address per tenant     │
                               │  - Inbound parse webhook → Next.js     │
                               └──────────────────────────────────┘
+                                        │ inbound email
+                                        └──────────► Next.js app
+
+                              ┌──────────────────────────────────┐
+                              │  SUPABASE (Realtime only)           │
+                              │  - pub/sub: live inbox, presence,     │
+                              │    needs-human notifications           │
+                              │  - No Postgres, no Supabase Auth        │
+                              └──────────────────────────────────┘
+                                        ▲            ▲
+                                        │            └── Next.js app
+                                        └─────────────── Realtime bridge
 ```
 
 **Why the bridge service now handles two jobs:** both voice and chat need a persistent, stateful connection to OpenAI's Realtime API — voice in speech-to-speech mode, chat in text-only mode. Rather than standing up a second persistent service, the existing bridge is extended to also terminate browser WebSocket connections from the chat widget. This keeps "things that need a long-lived connection" consolidated in one place, and lets both channels share the same AI session-handling logic, function/tool definitions (including `transfer_to_human`), and transcript-persistence code path.
@@ -112,7 +150,8 @@ Once tenant is resolved, all downstream work — identity matching, conversation
 
 - Identity matching (phone/email auto-merge) never crosses tenant boundaries.
 - Every core table carries `tenant_id`.
-- **Enforcement is application-layer first, RLS as backstop.** Because auth (Better Auth) is decoupled from Supabase, tenant scoping is not free the way it would be with Supabase Auth's native JWT-to-RLS integration. Every API route/query must explicitly filter by `tenant_id` derived from the verified Better Auth session — never rely on implicit context. RLS policies scoped by `tenant_id` should still be set up in Postgres as a second line of defense (passing the authenticated `tenant_id` into Postgres via a session variable), but the primary guarantee comes from disciplined application-layer filtering, not the database alone.
+- **Enforcement is application-layer, with nothing underneath it.** There is no RLS backstop, and there is not going to be one — see the superseded-decisions note in section 2. Every API route and every service method must explicitly filter by `tenant_id` derived from the verified Better Auth session; never rely on implicit context. Each `WHERE tenant_id = $1` *is* the security boundary, not a first line of defense in front of one. Treat a missing predicate as a security bug, not a correctness bug: the failure mode is returning another tenant's rows, and it has shipped more than once. New service methods need a matching case in `packages/database/src/services/tenant-isolation.test.ts`, which builds two parallel tenants and asserts that tenant A's call cannot see tenant B's row — a method that forgets its predicate passes every other test in the package, because every other test seeds one tenant.
+- **Cross-product isolation is at the database level.** comm-canoe and reside are separate logical databases on one PlanetScale cluster, and neither role holds `CONNECT` on the other's. That is deliberately stronger than a shared database with per-table grants, and it is what keeps a bug in the application layer above from reaching the other product. The cost is that a cross-product join is impossible rather than merely ungranted; the two are coupled only through reside's client uid.
 - Internal users access tenants via a membership table, not a single foreign key, since some staff need multi-tenant access (e.g. an agency managing several brands).
 
 ---
@@ -187,7 +226,7 @@ LiveTransfer
 4. Caller requests a human, or the agent determines escalation is needed
 5. Agent calls transfer_to_human(reason, conversation_id)
 6. Bridge:
-   a. Queries Supabase (internal network call) for on-call,
+   a. Queries the database (internal network call) for on-call,
       available users for the relevant team within this tenant
    b. Plays a short "connecting you now" message
    c. Calls Twilio's REST API to <Dial> the chosen user's phone number,
@@ -279,10 +318,9 @@ Separate from the real-time voice/chat AI — these are ordinary stateless API c
 
 ## 9. Open Questions / Not Yet Decided
 
-- Full Postgres schema in SQL (columns, types, indexes, constraints) — sketched above as entities only.
+- ~~Full Postgres schema in SQL (columns, types, indexes, constraints)~~ — resolved. `packages/database/src/schema/index.ts` is the source of truth; the generated DDL is `packages/database/drizzle/`. Section 5 above remains an entity-level sketch and is not authoritative.
 - API contract between Next.js and the bridge service (request/response shapes, internal auth between the two Railway services).
-- Exact mechanism for passing `tenant_id`/`user_id` from a Better Auth session into Postgres RLS as a backstop (e.g. `SET LOCAL` per request vs. a custom claim read by policy functions) — needed once RLS-as-backstop is implemented, not a blocker for initial build.
-- Whether tenant branding/config (greeting message, business hours, FAQ content) lives in its own `TenantSettings` table or as JSON config on `Tenant`.
+- ~~Whether tenant branding/config (greeting message, business hours, FAQ content) lives in its own `TenantSettings` table or as JSON config on `Tenant`~~ — resolved as its own `tenant_settings` table.
 - Rate limiting / abuse handling for inbound channels (e.g. spam SMS, robocall floods hitting the voice agent, or scripted spam connecting to the chat widget).
 - Whether `LiveTransfer` no-answer fallback (voice or chat) should retry a second on-call user before giving up, or go straight to voicemail/message-taking.
 - Widget reconnection protocol — how a dropped chat WebSocket resumes against the same `Conversation` rather than starting a new one.

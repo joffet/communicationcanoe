@@ -4,24 +4,27 @@ import { generateWidgetKey } from "./chat-session";
 import { createDb, type Db } from "../db";
 import { normalizeEmail, normalizePhone } from "../client";
 import { tenantSettings, tenants, userTenantMemberships, users } from "../schema";
-import type { PlatformRole, Tenant, UserRow } from "../types";
+import type { PlatformRole, Tenant, User } from "../types";
 
-export type AdminTenantRow = Tenant & {
-  member_count: number;
+/** A tenant as the admin list needs it: the Drizzle row plus the one derived
+ * field the table renders. camelCase throughout, like the row it extends. */
+export type AdminTenant = Tenant & {
+  memberCount: number;
 };
 
 export type AdminUserMembershipSummary = {
-  tenant_id: string;
-  tenant_name: string;
+  tenantId: string;
+  /** Falls back to the id when the tenant is gone - see listAllUsers. */
+  tenantName: string;
   role: "admin" | "member";
 };
 
-export type AdminUserRow = UserRow & {
+export type AdminUser = User & {
   memberships: AdminUserMembershipSummary[];
 };
 
 export type UserMembershipInput = {
-  tenant_id: string;
+  tenantId: string;
   role: "admin" | "member";
 };
 
@@ -48,7 +51,7 @@ export class AdminService {
     return role === "super_admin";
   }
 
-  async listAllTenants(): Promise<AdminTenantRow[]> {
+  async listAllTenants(): Promise<AdminTenant[]> {
     const rows = await this.orm.select().from(tenants).orderBy(asc(tenants.name));
     if (!rows.length) return [];
 
@@ -63,7 +66,7 @@ export class AdminService {
 
     return rows.map((tenant) => ({
       ...tenant,
-      member_count: counts.get(tenant.id) ?? 0,
+      memberCount: counts.get(tenant.id) ?? 0,
     }));
   }
 
@@ -96,18 +99,18 @@ export class AdminService {
   async createTenant(input: {
     id?: string;
     name: string;
-    twilio_number: string;
-    inbound_email_address: string;
-    provisioning_source?: "manual" | "reside";
+    twilioNumber: string;
+    inboundEmailAddress: string;
+    provisioningSource?: "manual" | "reside";
     /** reside's client uid. Defaults to `id` only for manually-created tenants
      * that predate the split; reside-provisioned tenants always pass it. */
-    reside_client_uid?: string;
-    reside_app_url?: string | null;
+    resideClientUid?: string;
+    resideAppUrl?: string | null;
   }): Promise<Tenant> {
-    const twilio_number = normalizePhone(input.twilio_number);
-    const inbound_email_address = normalizeEmail(input.inbound_email_address);
+    const twilioNumber = normalizePhone(input.twilioNumber);
+    const inboundEmailAddress = normalizeEmail(input.inboundEmailAddress);
     const id = input.id ?? randomUUID();
-    const reside_client_uid = input.reside_client_uid ?? id;
+    const resideClientUid = input.resideClientUid ?? id;
 
     // One transaction: a tenant with no settings row is a tenant whose SLA
     // window and greeting read as undefined everywhere downstream.
@@ -117,13 +120,13 @@ export class AdminService {
         .values({
           id,
           name: input.name.trim(),
-          twilioNumber: twilio_number,
-          inboundEmailAddress: inbound_email_address,
+          twilioNumber,
+          inboundEmailAddress,
           // NOT NULL with no database default, so it has to be supplied here.
           chatWidgetKey: generateWidgetKey(),
-          provisioningSource: input.provisioning_source ?? "manual",
-          resideClientUid: reside_client_uid,
-          resideAppUrl: input.reside_app_url ?? null,
+          provisioningSource: input.provisioningSource ?? "manual",
+          resideClientUid,
+          resideAppUrl: input.resideAppUrl ?? null,
         })
         .returning();
 
@@ -143,23 +146,23 @@ export class AdminService {
     id: string,
     input: {
       name: string;
-      twilio_number: string;
-      inbound_email_address: string;
+      twilioNumber: string;
+      inboundEmailAddress: string;
     },
   ): Promise<Tenant> {
     const [tenant] = await this.orm
       .update(tenants)
       .set({
         name: input.name.trim(),
-        twilioNumber: normalizePhone(input.twilio_number),
-        inboundEmailAddress: normalizeEmail(input.inbound_email_address),
+        twilioNumber: normalizePhone(input.twilioNumber),
+        inboundEmailAddress: normalizeEmail(input.inboundEmailAddress),
       })
       .where(eq(tenants.id, id))
       .returning();
     return tenant;
   }
 
-  async listAllUsers(): Promise<AdminUserRow[]> {
+  async listAllUsers(): Promise<AdminUser[]> {
     const rows = await this.orm.select().from(users).orderBy(asc(users.email));
     if (!rows.length) return [];
 
@@ -185,10 +188,10 @@ export class AdminService {
     for (const row of memberships) {
       const list = membershipsByUser.get(row.userId) ?? [];
       list.push({
-        tenant_id: row.tenantId,
+        tenantId: row.tenantId,
         // Falls back to the id so a membership pointing at a deleted tenant
         // still renders as something rather than an empty cell.
-        tenant_name: tenantMap.get(row.tenantId) ?? row.tenantId,
+        tenantName: tenantMap.get(row.tenantId) ?? row.tenantId,
         role: row.role,
       });
       membershipsByUser.set(row.userId, list);
@@ -200,45 +203,27 @@ export class AdminService {
     }));
   }
 
-  async getUserById(id: string): Promise<AdminUserRow | null> {
+  async getUserById(id: string): Promise<AdminUser | null> {
     const users = await this.listAllUsers();
     return users.find((u) => u.id === id) ?? null;
   }
 
-  async getUserByEmail(email: string): Promise<UserRow | null> {
+  async getUserByEmail(email: string): Promise<User | null> {
     const normalized = normalizeEmail(email);
     const [user] = await this.orm
       .select().from(users).where(eq(users.email, normalized)).limit(1);
     return user ?? null;
   }
 
-  async createAppUser(input: {
-    id: string;
-    email: string;
-    name?: string | null;
-    platform_role?: PlatformRole;
-  }): Promise<UserRow> {
-    const [user] = await this.orm
-      .insert(users)
-      .values({
-        id: input.id,
-        email: normalizeEmail(input.email),
-        name: input.name?.trim() || null,
-        platformRole: input.platform_role ?? "user",
-      })
-      .returning();
-    return user;
-  }
-
   async updateUser(
     id: string,
     input: {
       name?: string | null;
-      phone_number?: string | null;
-      available_for_calls?: boolean;
-      platform_role?: PlatformRole;
+      phoneNumber?: string | null;
+      availableForCalls?: boolean;
+      platformRole?: PlatformRole;
     },
-  ): Promise<UserRow> {
+  ): Promise<User> {
     // Built key by key rather than spread: an undefined field must mean "leave
     // it alone", and passing it through would null the column instead.
     const patch: Partial<{
@@ -248,14 +233,14 @@ export class AdminService {
       platformRole: PlatformRole;
     }> = {};
     if (input.name !== undefined) patch.name = input.name?.trim() || null;
-    if (input.phone_number !== undefined) {
-      patch.phoneNumber = input.phone_number?.trim() || null;
+    if (input.phoneNumber !== undefined) {
+      patch.phoneNumber = input.phoneNumber?.trim() || null;
     }
-    if (input.available_for_calls !== undefined) {
-      patch.availableForCalls = input.available_for_calls;
+    if (input.availableForCalls !== undefined) {
+      patch.availableForCalls = input.availableForCalls;
     }
-    if (input.platform_role !== undefined) {
-      patch.platformRole = input.platform_role;
+    if (input.platformRole !== undefined) {
+      patch.platformRole = input.platformRole;
     }
 
     const [user] = await this.orm
@@ -279,7 +264,7 @@ export class AdminService {
       await tx.insert(userTenantMemberships).values(
         memberships.map((m) => ({
           userId,
-          tenantId: m.tenant_id,
+          tenantId: m.tenantId,
           role: m.role,
         })),
       );

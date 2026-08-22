@@ -22,7 +22,7 @@ import {
 } from "./users.utils";
 
 type UsersViewAllProps = {
-  users: AdminUserRow[];
+  users: AdminUser[];
 };
 
 export function UsersViewAll({ users }: UsersViewAllProps) {

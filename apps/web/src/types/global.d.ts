@@ -9,38 +9,15 @@
 
 declare global {
   // @communication-canoe/database — types.ts
-  type Json = import("@communication-canoe/database").Json;
-  type Database = import("@communication-canoe/database").Database;
-  type TenantRow = import("@communication-canoe/database").TenantRow;
-  type TenantInsert = import("@communication-canoe/database").TenantInsert;
-  type TenantSettingsRow = import("@communication-canoe/database").TenantSettingsRow;
-  type TenantSettingsInsert = import("@communication-canoe/database").TenantSettingsInsert;
+  //
+  // Every one of these is inferred from the Drizzle schema, so the fields are
+  // camelCase. The snake_case Row/Insert pairs that used to sit here went with
+  // the `Database` shape they described — see packages/database/src/schema/notes.md.
   type PlatformRole = import("@communication-canoe/database").PlatformRole;
-  type UserRow = import("@communication-canoe/database").UserRow;
-  type UserInsert = import("@communication-canoe/database").UserInsert;
-  type UserTenantMembershipRow = import("@communication-canoe/database").UserTenantMembershipRow;
-  type UserTenantMembershipInsert =
-    import("@communication-canoe/database").UserTenantMembershipInsert;
-  type TeamRow = import("@communication-canoe/database").TeamRow;
-  type TeamInsert = import("@communication-canoe/database").TeamInsert;
-  type TeamMembershipRow = import("@communication-canoe/database").TeamMembershipRow;
-  type TeamMembershipInsert = import("@communication-canoe/database").TeamMembershipInsert;
-  type IdentityRow = import("@communication-canoe/database").IdentityRow;
-  type IdentityInsert = import("@communication-canoe/database").IdentityInsert;
-  type IdentityMergeLogRow = import("@communication-canoe/database").IdentityMergeLogRow;
-  type IdentityMergeLogInsert = import("@communication-canoe/database").IdentityMergeLogInsert;
-  type ConversationRow = import("@communication-canoe/database").ConversationRow;
-  type ConversationInsert = import("@communication-canoe/database").ConversationInsert;
-  type MessageRow = import("@communication-canoe/database").MessageRow;
-  type MessageInsert = import("@communication-canoe/database").MessageInsert;
-  type LiveTransferRow = import("@communication-canoe/database").LiveTransferRow;
-  type LiveTransferInsert = import("@communication-canoe/database").LiveTransferInsert;
-  type IdentityConversionLogRow =
-    import("@communication-canoe/database").IdentityConversionLogRow;
-  type IdentityConversionLogInsert =
-    import("@communication-canoe/database").IdentityConversionLogInsert;
-  type Tables<T extends keyof Database["public"]["Tables"]> =
-    import("@communication-canoe/database").Tables<T>;
+  type ConversationPriority = import("@communication-canoe/database").ConversationPriority;
+  type MessageDeliveryStatus = import("@communication-canoe/database").MessageDeliveryStatus;
+  type TenantSettings = import("@communication-canoe/database").TenantSettings;
+  type User = import("@communication-canoe/database").User;
   type Tenant = import("@communication-canoe/database").Tenant;
   type Identity = import("@communication-canoe/database").Identity;
   type Conversation = import("@communication-canoe/database").Conversation;
@@ -53,10 +30,10 @@ declare global {
 
   // @communication-canoe/database — client & services
   type AppSupabaseClient = import("@communication-canoe/database").AppSupabaseClient;
-  type AdminTenantRow = import("@communication-canoe/database").AdminTenantRow;
+  type AdminTenant = import("@communication-canoe/database").AdminTenant;
+  type AdminUser = import("@communication-canoe/database").AdminUser;
   type AdminUserMembershipSummary =
     import("@communication-canoe/database").AdminUserMembershipSummary;
-  type AdminUserRow = import("@communication-canoe/database").AdminUserRow;
   type UserMembershipInput = import("@communication-canoe/database").UserMembershipInput;
   type ChatSessionPayload = import("@communication-canoe/database").ChatSessionPayload;
 
