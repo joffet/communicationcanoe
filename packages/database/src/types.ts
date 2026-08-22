@@ -616,6 +616,10 @@ export type DocumentInsert = {
 // as a plain array through the JS client) even though the caller may omit it
 // - a chunk row is always inserted with its embedding already computed, but
 // Insert still marks it optional since Postgres would otherwise allow NULL.
+//
+// Row and Insert below are the snake_case supabase shape, like every other
+// pair in this file. The Drizzle insert shape - camelCase, Date timestamps -
+// is NewDocumentChunk, further down.
 export type DocumentChunkRow = {
   id: string;
   document_id: string;
@@ -627,7 +631,16 @@ export type DocumentChunkRow = {
   created_at: string;
 };
 
-export type DocumentChunkInsert = typeof documentChunks.$inferInsert;
+export type DocumentChunkInsert = {
+  id?: string;
+  document_id: string;
+  tenant_id: string;
+  chunk_index: number;
+  heading?: string | null;
+  content: string;
+  embedding?: number[] | null;
+  created_at?: string;
+};
 
 export type Tables<T extends keyof DatabaseTables> = DatabaseTables[T]["Row"];
 
@@ -667,7 +680,12 @@ export type ConversationReadState = typeof conversationReadStates.$inferSelect;
 export type ConversationPersonalTag = typeof conversationPersonalTags.$inferSelect;
 export type ConversationParticipant = typeof conversationParticipants.$inferSelect;
 export type Document = typeof documents.$inferSelect;
-export type DocumentChunk = DocumentChunkRow;
+export type DocumentChunk = typeof documentChunks.$inferSelect;
+/** The Drizzle INSERT shape - camelCase fields, `Date` for created_at.
+ * insertDocumentChunks writes through the ORM, so this is what its callers
+ * build; DocumentChunkInsert above is the snake_case supabase shape and is
+ * not interchangeable with it. */
+export type NewDocumentChunk = typeof documentChunks.$inferInsert;
 
 /** Everyone else on the thread besides the primary `identity`/`assigned_user_id`
  * - additive per Phase 2's design (see conversation_participants migration),

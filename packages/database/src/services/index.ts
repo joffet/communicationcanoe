@@ -51,11 +51,11 @@ import type {
   ConversationViewerState,
   ConversationWithIdentity,
   Document,
-  DocumentChunkInsert,
   Identity,
   LiveTransfer,
   Message,
   MessageDeliveryStatus,
+  NewDocumentChunk,
   OutboundBatch,
   OutboundBatchRecipient,
   Tag,
@@ -2323,7 +2323,7 @@ export class DomainService {
     return claimed ?? null;
   }
 
-  async insertDocumentChunks(chunks: DocumentChunkInsert[]): Promise<void> {
+  async insertDocumentChunks(chunks: NewDocumentChunk[]): Promise<void> {
     if (chunks.length === 0) return;
     await this.orm.insert(documentChunks).values(chunks);
   }

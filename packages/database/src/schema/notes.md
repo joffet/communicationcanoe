@@ -200,20 +200,49 @@ backfilled from `id::text`, set `NOT NULL`, no default) and was always marked
 required. The two disagreeing is what made #1 look like an oversight rather
 than a decision, and it was.
 
-### Discrepancy #2 — `DocumentChunkInsert` is derived, every other Insert is hand-written
+### Discrepancy #2 — one `DocumentChunkInsert` served two incompatible shapes — **fixed**
 
-`types.ts` spells out each `*Insert` as a literal object type, except:
+`types.ts` spells out each `*Insert` as a snake_case literal, except that
+`document_chunks` had:
 
 ```ts
 export type DocumentChunkInsert = typeof documentChunks.$inferInsert;
 ```
 
-Not a bug — `$inferInsert` is strictly more accurate, since it cannot drift from
-the schema at all. It is recorded because it means the file is two things at
-once, and a reader who assumes "all of these are hand-written literals" (or the
-reverse) will be wrong about one of them. The consistent fix in either direction
-is mechanical; the `$inferInsert` direction would also make discrepancy #1
-impossible by construction.
+Originally filed here as a style inconsistency. On closer reading it was a real
+defect, because that single name had two consumers wanting **different shapes**:
+
+1. `insertDocumentChunks` in `services/index.ts`, which writes through
+   `this.orm.insert(documentChunks).values(chunks)` — a Drizzle insert, so it
+   wants the schema's own field names: **camelCase**, with `Date` for
+   `created_at`.
+2. `document_chunks: TableDef<DocumentChunkRow, DocumentChunkInsert>` in
+   `DatabaseTables`, the shape that parameterizes `SupabaseClient<Database>` —
+   which speaks **snake_case** column names, with `string` timestamps.
+
+`$inferInsert` satisfies the first and is wrong for the second, so the
+`Database` type declared that `document_chunks` returns `snake_case` on select
+and accepts `camelCase` on insert. Incoherent, and the only table in the file
+where that was true. It never broke anything because nothing reads or writes
+tables through the supabase client any more — it is Realtime-only.
+
+**Resolution: the two shapes are separate types.**
+
+| Type | Shape | Consumer |
+|---|---|---|
+| `DocumentChunkInsert` | snake_case literal, matches `DocumentChunkRow` and all 22 siblings | `TableDef` / the `Database` shape |
+| `NewDocumentChunk` | `typeof documentChunks.$inferInsert` — camelCase, `Date` | `insertDocumentChunks` |
+
+`DocumentChunk` was corrected in the same pass. It aliased `DocumentChunkRow`
+(snake_case) while the adjacent `Document` is `typeof documents.$inferSelect`
+(camelCase) — the same which-side-is-this-on confusion, on the next line. It is
+now `$inferSelect` like its neighbour. Nothing consumed it, so the change is
+inert; leaving it as the odd one out while introducing `NewDocumentChunk`
+beside it would have made the pair actively misleading.
+
+The convention this restores, and the one to keep following: **bare noun =
+Drizzle shape** (`Document`, `DocumentChunk`, `NewDocumentChunk`), **`*Row` /
+`*Insert` = snake_case supabase shape**.
 
 ### Non-discrepancies
 
