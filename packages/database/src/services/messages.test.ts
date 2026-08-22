@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { DomainService } from "./index";
 import type { AppSupabaseClient } from "../client";
 import { createTestDb, resetTestDb, type TestDb } from "../testing/pglite";
-import { conversations, identities, tenantSettings, tenants } from "../schema";
+import { conversations, identities, messages, tenantSettings, tenants } from "../schema";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -166,5 +166,43 @@ describe("updateMessageDeliveryStatus", () => {
 
     const after = await domain.getMessageById(message.id);
     expect(after?.deliveryAttempts).toBe(2);
+  });
+});
+
+describe("markMessageOpened", () => {
+  /**
+   * reside forwards only the FIRST open into its notification inbox, and it
+   * decides that from this return value. An image proxy re-fetches the pixel
+   * every time a message is displayed, so if this reported true each time,
+   * reside would receive a steady stream of calls all describing one event.
+   */
+  it("reports the first open, and not the ones after it", async () => {
+    const { tenant, conversation } = await seed();
+    const message = await domain.appendMessage(baseMessage(tenant.id, conversation.id));
+
+    const first = await domain.markMessageOpened(message.id);
+    expect(first.firstOpen).toBe(true);
+
+    const second = await domain.markMessageOpened(message.id);
+    expect(second.firstOpen).toBe(false);
+  });
+
+  it("keeps the original timestamp when the pixel is fetched again", async () => {
+    const { tenant, conversation } = await seed();
+    const message = await domain.appendMessage(baseMessage(tenant.id, conversation.id));
+
+    await domain.markMessageOpened(message.id);
+    const [afterFirst] = await db.select().from(messages).where(eq(messages.id, message.id));
+    await domain.markMessageOpened(message.id);
+    const [afterSecond] = await db.select().from(messages).where(eq(messages.id, message.id));
+
+    expect(afterSecond.openedAt).toEqual(afterFirst.openedAt);
+  });
+
+  it("reports false for a message id that does not exist", async () => {
+    // reside sends every open it hears about; an id matching nothing must not
+    // look like a recorded open.
+    const result = await domain.markMessageOpened("00000000-0000-0000-0000-000000000000");
+    expect(result.firstOpen).toBe(false);
   });
 });
