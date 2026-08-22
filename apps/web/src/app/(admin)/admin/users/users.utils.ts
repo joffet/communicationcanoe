@@ -1,11 +1,11 @@
-export type UsersSortField = "name" | "email" | "created_at" | "platform_role";
+export type UsersSortField = "name" | "email" | "createdAt" | "platform_role";
 
 export const DEFAULT_USERS_SORT: SortConfig<UsersSortField> = {
   field: "email",
   direction: "asc",
 };
 
-export function sortUsers(users: AdminUserRow[], config: SortConfig<UsersSortField>): AdminUserRow[] {
+export function sortUsers(users: AdminUser[], config: SortConfig<UsersSortField>): AdminUser[] {
   const sorted = [...users];
   const dir = config.direction === "asc" ? 1 : -1;
 
@@ -17,7 +17,7 @@ export function sortUsers(users: AdminUserRow[], config: SortConfig<UsersSortFie
         return a.email.localeCompare(b.email) * dir;
       case "platform_role":
         return a.platformRole.localeCompare(b.platformRole) * dir;
-      case "created_at":
+      case "createdAt":
         return (
           (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) *
           dir
@@ -30,20 +30,20 @@ export function sortUsers(users: AdminUserRow[], config: SortConfig<UsersSortFie
   return sorted;
 }
 
-export function userMatchesSearch(user: AdminUserRow, query: string): boolean {
+export function userMatchesSearch(user: AdminUser, query: string): boolean {
   const q = query.toLowerCase();
   return (
     user.email.toLowerCase().includes(q) ||
     (user.name?.toLowerCase().includes(q) ?? false) ||
-    user.memberships.some((m) => m.tenant_name.toLowerCase().includes(q))
+    user.memberships.some((m) => m.tenantName.toLowerCase().includes(q))
   );
 }
 
-export function formatMembershipSummary(user: AdminUserRow): string {
+export function formatMembershipSummary(user: AdminUser): string {
   if (user.memberships.length === 0) return "—";
   if (user.memberships.length === 1) {
     const m = user.memberships[0]!;
-    return `${m.tenant_name} (${m.role})`;
+    return `${m.tenantName} (${m.role})`;
   }
   return `${user.memberships.length} tenants`;
 }

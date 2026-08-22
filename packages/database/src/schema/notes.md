@@ -292,6 +292,14 @@ What survived, and why:
   (`ConversationThread`, `ConversationWithIdentity`, `ConversationExtras`,
   `ConversationViewerState`).
 
+The admin service's view models followed: `AdminTenantRow` → `AdminTenant`,
+`AdminUserRow` → `AdminUser`. Both are a Drizzle row plus derived fields
+(`memberCount`, `memberships`), and those fields were snake_case sitting on a
+camelCase row — `listAllUsers` was converting `row.tenantId` into `tenant_id`
+purely to satisfy the type, then the UI read it back. They are camelCase now,
+and the conversion is gone. Nothing in that family crosses the reside wire; it
+is comm-canoe's own `/admin` pages only.
+
 `AppSupabaseClient` is now bare `SupabaseClient`. Four string unions
 (`MessageVisibility`, `MessageAiReviewStatus`, `MessageTopicCheckStatus`,
 `MessageTranscriptionStatus`) went too — `@communication-canoe/shared` defines

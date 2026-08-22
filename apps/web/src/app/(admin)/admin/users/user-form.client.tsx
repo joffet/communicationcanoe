@@ -17,14 +17,14 @@ import {
 import { createUserAction, updateUserAction } from "./actions";
 
 type UserFormProps = {
-  user?: AdminUserRow | null;
+  user?: AdminUser | null;
   tenants: Pick<Tenant, "id" | "name">[];
 };
 
-function membershipsFromUser(user?: AdminUserRow | null): UserMembershipInput[] {
+function membershipsFromUser(user?: AdminUser | null): UserMembershipInput[] {
   if (!user) return [];
   return user.memberships.map((m) => ({
-    tenant_id: m.tenant_id,
+    tenantId: m.tenantId,
     role: m.role,
   }));
 }
@@ -51,12 +51,12 @@ export function UserForm({ user, tenants }: UserFormProps) {
 
   function addMembershipRow() {
     const unused = tenants.find(
-      (t) => !memberships.some((m) => m.tenant_id === t.id),
+      (t) => !memberships.some((m) => m.tenantId === t.id),
     );
     if (!unused) return;
     setMemberships((prev) => [
       ...prev,
-      { tenant_id: unused.id, role: "member" },
+      { tenantId: unused.id, role: "member" },
     ]);
   }
 
@@ -212,13 +212,13 @@ export function UserForm({ user, tenants }: UserFormProps) {
           <div className="space-y-2">
             {memberships.map((row, index) => (
               <div
-                key={`${row.tenant_id}-${index}`}
+                key={`${row.tenantId}-${index}`}
                 className="flex flex-wrap items-center gap-2 rounded-md border border-zinc-200 p-3 dark:border-zinc-800"
               >
                 <Select
-                  value={row.tenant_id}
+                  value={row.tenantId}
                   onValueChange={(tenantId) =>
-                    updateMembership(index, { tenant_id: tenantId })
+                    updateMembership(index, { tenantId })
                   }
                   disabled={busy}
                 >

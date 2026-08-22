@@ -9,10 +9,10 @@ export const DEFAULT_TENANTS_FILTER: TenantsFilterState = {
 };
 
 export function tenantPassesAdminFilters(
-  tenant: AdminTenantRow,
+  tenant: AdminTenant,
   filter: TenantsFilterState,
 ): boolean {
-  const hasMembers = tenant.member_count > 0;
+  const hasMembers = tenant.memberCount > 0;
   if (hasMembers && !filter.showHasMembers) return false;
   if (!hasMembers && !filter.showNoMembers) return false;
   return true;

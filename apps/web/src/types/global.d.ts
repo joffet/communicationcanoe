@@ -30,10 +30,10 @@ declare global {
 
   // @communication-canoe/database — client & services
   type AppSupabaseClient = import("@communication-canoe/database").AppSupabaseClient;
-  type AdminTenantRow = import("@communication-canoe/database").AdminTenantRow;
+  type AdminTenant = import("@communication-canoe/database").AdminTenant;
+  type AdminUser = import("@communication-canoe/database").AdminUser;
   type AdminUserMembershipSummary =
     import("@communication-canoe/database").AdminUserMembershipSummary;
-  type AdminUserRow = import("@communication-canoe/database").AdminUserRow;
   type UserMembershipInput = import("@communication-canoe/database").UserMembershipInput;
   type ChatSessionPayload = import("@communication-canoe/database").ChatSessionPayload;
 

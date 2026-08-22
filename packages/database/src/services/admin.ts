@@ -6,22 +6,25 @@ import { normalizeEmail, normalizePhone } from "../client";
 import { tenantSettings, tenants, userTenantMemberships, users } from "../schema";
 import type { PlatformRole, Tenant, User } from "../types";
 
-export type AdminTenantRow = Tenant & {
-  member_count: number;
+/** A tenant as the admin list needs it: the Drizzle row plus the one derived
+ * field the table renders. camelCase throughout, like the row it extends. */
+export type AdminTenant = Tenant & {
+  memberCount: number;
 };
 
 export type AdminUserMembershipSummary = {
-  tenant_id: string;
-  tenant_name: string;
+  tenantId: string;
+  /** Falls back to the id when the tenant is gone - see listAllUsers. */
+  tenantName: string;
   role: "admin" | "member";
 };
 
-export type AdminUserRow = User & {
+export type AdminUser = User & {
   memberships: AdminUserMembershipSummary[];
 };
 
 export type UserMembershipInput = {
-  tenant_id: string;
+  tenantId: string;
   role: "admin" | "member";
 };
 
@@ -48,7 +51,7 @@ export class AdminService {
     return role === "super_admin";
   }
 
-  async listAllTenants(): Promise<AdminTenantRow[]> {
+  async listAllTenants(): Promise<AdminTenant[]> {
     const rows = await this.orm.select().from(tenants).orderBy(asc(tenants.name));
     if (!rows.length) return [];
 
@@ -63,7 +66,7 @@ export class AdminService {
 
     return rows.map((tenant) => ({
       ...tenant,
-      member_count: counts.get(tenant.id) ?? 0,
+      memberCount: counts.get(tenant.id) ?? 0,
     }));
   }
 
@@ -159,7 +162,7 @@ export class AdminService {
     return tenant;
   }
 
-  async listAllUsers(): Promise<AdminUserRow[]> {
+  async listAllUsers(): Promise<AdminUser[]> {
     const rows = await this.orm.select().from(users).orderBy(asc(users.email));
     if (!rows.length) return [];
 
@@ -185,10 +188,10 @@ export class AdminService {
     for (const row of memberships) {
       const list = membershipsByUser.get(row.userId) ?? [];
       list.push({
-        tenant_id: row.tenantId,
+        tenantId: row.tenantId,
         // Falls back to the id so a membership pointing at a deleted tenant
         // still renders as something rather than an empty cell.
-        tenant_name: tenantMap.get(row.tenantId) ?? row.tenantId,
+        tenantName: tenantMap.get(row.tenantId) ?? row.tenantId,
         role: row.role,
       });
       membershipsByUser.set(row.userId, list);
@@ -200,7 +203,7 @@ export class AdminService {
     }));
   }
 
-  async getUserById(id: string): Promise<AdminUserRow | null> {
+  async getUserById(id: string): Promise<AdminUser | null> {
     const users = await this.listAllUsers();
     return users.find((u) => u.id === id) ?? null;
   }
@@ -279,7 +282,7 @@ export class AdminService {
       await tx.insert(userTenantMemberships).values(
         memberships.map((m) => ({
           userId,
-          tenantId: m.tenant_id,
+          tenantId: m.tenantId,
           role: m.role,
         })),
       );

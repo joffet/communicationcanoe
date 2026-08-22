@@ -13,7 +13,7 @@ export const DEFAULT_USERS_FILTER: UsersFilterState = {
 };
 
 export function userPassesAdminFilters(
-  user: AdminUserRow,
+  user: AdminUser,
   filter: UsersFilterState,
 ): boolean {
   const isSuper = user.platformRole === "super_admin";

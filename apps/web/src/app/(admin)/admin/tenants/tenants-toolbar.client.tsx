@@ -26,8 +26,8 @@ type TenantsToolbarProps = {
 
 const SORT_OPTIONS: { value: TenantsSortField; label: string }[] = [
   { value: "name", label: "Name" },
-  { value: "created_at", label: "Created" },
-  { value: "member_count", label: "Members" },
+  { value: "createdAt", label: "Created" },
+  { value: "memberCount", label: "Members" },
 ];
 
 export function TenantsToolbar({

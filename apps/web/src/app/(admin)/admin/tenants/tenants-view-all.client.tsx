@@ -22,7 +22,7 @@ import {
 } from "./tenants.utils";
 
 type TenantsViewAllProps = {
-  tenants: AdminTenantRow[];
+  tenants: AdminTenant[];
 };
 
 export function TenantsViewAll({ tenants }: TenantsViewAllProps) {
