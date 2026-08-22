@@ -7,13 +7,11 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
-    "db:start": "supabase start",
-    "db:stop": "supabase stop",
-    "db:reset": "supabase db reset",
-    "db:types": "supabase gen types typescript --local > packages/database/src/types.ts"
+    "db:generate": "pnpm --filter @communication-canoe/database db:generate",
+    "db:migrate": "pnpm --filter @communication-canoe/database db:migrate",
+    "db:studio": "pnpm --filter @communication-canoe/database db:studio"
   },
   "devDependencies": {
-    "supabase": "^2.20.12",
     "turbo": "^2.5.4",
     "typescript": "^5.9.3"
   },

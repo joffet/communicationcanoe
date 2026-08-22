@@ -1,6 +1,6 @@
 # Communication Canoe
 
-Multi-tenant customer enquiry platform for voice, SMS, email, and embeddable web chat — built as a pnpm monorepo with Next.js 16, Better Auth, Supabase Postgres, and Tailwind CSS.
+Multi-tenant customer enquiry platform for voice, SMS, email, and embeddable web chat — built as a pnpm monorepo with Next.js 16, Better Auth, PlanetScale Postgres (Drizzle ORM), and Tailwind CSS. Supabase remains in the stack for Realtime pub/sub only.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for system design, data model, and build order.
 
@@ -10,39 +10,44 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system design, data model, and buil
 apps/web              Next.js dashboard, webhooks, AI routes, Better Auth
 apps/realtime-bridge  Realtime bridge — Twilio Media Streams + chat widget WS
 packages/chat-widget  Embeddable chat widget (built to realtime-bridge/public)
-packages/database     Supabase clients and domain services
+packages/database     Drizzle schema, migrations, and domain services
 packages/shared       Zod schemas, email parsers, AI tasks, Realtime protocol
-supabase/             Migrations, RLS backstop, seed data
+supabase/             Pre-cutover migration history and dev seed — no longer applied
 ```
 
 ## Prerequisites
 
 - Node.js 20+
 - pnpm 9+ (`corepack enable`)
-- Hosted [Supabase](https://supabase.com) project (Postgres + Realtime) **or** local Supabase via Docker
+- [PlanetScale](https://planetscale.com) Postgres database (app data), plus a hosted [Supabase](https://supabase.com) project for Realtime
 
-## Quick Start (Hosted Supabase)
+## Quick Start
 
 ```bash
 pnpm install
 cp .env.example apps/web/.env.local
-# Fill in: Supabase URL/keys, DATABASE_URL, BETTER_AUTH_SECRET
+# Fill in: DATABASE_URL, MIGRATION_DATABASE_URL, Supabase URL/keys, BETTER_AUTH_SECRET
 
-# Link and push app migrations
-pnpm exec supabase login
-pnpm exec supabase link --project-ref YOUR_PROJECT_REF
-pnpm exec supabase db push
+# Once per cluster, as the postgres role — creates the logical database and app
+# role. See packages/database/sql/README.md for run order and how to execute it.
+#   packages/database/sql/00-bootstrap-database-and-role.sql
+
+# Build the schema
+pnpm db:migrate
+
+# Functions and triggers, after the tables exist (also from packages/database/sql)
+#   packages/database/sql/99-functions-and-triggers.sql
 
 # Create Better Auth tables (user, session, account, verification)
 pnpm --filter @communication-canoe/web auth:migrate
 
 # Optional: seed sample tenants/conversations
-pnpm exec supabase db query --linked --file supabase/seed.sql
+psql "$MIGRATION_DATABASE_URL" -f supabase/seed.sql
 
 pnpm dev
 ```
 
-**Better Auth and RLS:** Better Auth creates `"user"`, `"session"`, `"account"`, and `"verification"` in the exposed `public` schema (emails, session tokens, passwords). Run `supabase db push` **before** `auth:migrate` on a fresh project so the RLS migration and auto-RLS event trigger are in place first; new Better Auth tables then get RLS automatically. If you already ran `auth:migrate`, run `supabase db push` to lock down existing auth tables. Better Auth itself uses `DATABASE_URL` (postgres role), not the anon key — RLS only blocks PostgREST/API access.
+**Better Auth tables:** Better Auth creates `"user"`, `"session"`, `"account"`, and `"verification"` itself, using `DATABASE_URL`. They are deliberately absent from the Drizzle schema — `better-auth migrate` owns them — and `drizzle.config.ts` excludes them from the diff via `tablesFilter`, so drizzle-kit will never propose dropping them.
 
 - Web app: http://localhost:3000
 - Realtime bridge health: http://localhost:3001/health
@@ -54,14 +59,14 @@ Generate `BETTER_AUTH_SECRET`:
 openssl rand -base64 32
 ```
 
-Get `DATABASE_URL` from Supabase Dashboard → **Connect** → ORMs / URI (use the **pooler** connection string on port 6543 for serverless/Railway).
+`DATABASE_URL` is the app role's PlanetScale connection string (`comm_canoe_app`); `MIGRATION_DATABASE_URL` is the `postgres` role's, used by drizzle-kit only. The app role owns nothing and holds no `CREATE`, so it cannot run DDL by design — see the comments in [drizzle.config.ts](packages/database/drizzle.config.ts). The Supabase URL/keys are for Realtime only.
 
 ## Auth and Tenant Access
 
 Auth runs via **Better Auth** (magic link only) inside the Next.js app — not Supabase Auth. Outbound email uses **Amazon SES**.
 
 1. Sign in at `/login` — enter your email and open the magic link (creates Better Auth user + `public.users` on first sign-in).
-2. Grant tenant access in **SQL Editor** (replace `YOUR_USER_ID` with the Better Auth user id):
+2. Grant tenant access against the database (replace `YOUR_USER_ID` with the Better Auth user id):
 
 ```sql
 INSERT INTO user_tenant_memberships (user_id, tenant_id, role)
@@ -131,13 +136,16 @@ When adding a user from admin, the **Send sign-in email** toggle (default on) se
 |---|---|
 | `pnpm dev` | Start web + realtime-bridge |
 | `pnpm build` | Production build |
-| `pnpm exec supabase db push` | Push Supabase migrations to hosted project (run before `auth:migrate` on fresh setups) |
+| `pnpm db:generate` | Generate a migration from changes to `packages/database/src/schema/index.ts` |
+| `pnpm db:migrate` | Apply pending Drizzle migrations (uses `MIGRATION_DATABASE_URL`) |
+| `pnpm db:studio` | Open Drizzle Studio against the database |
 | `pnpm --filter @communication-canoe/web auth:migrate` | Create/update Better Auth tables (uses `--yes`; requires `DATABASE_URL`) |
 
 ## Deployment Notes
 
 - **Railway:** deploy `apps/web` and `apps/realtime-bridge` as separate services.
-- **Supabase:** Postgres + Realtime only; no Supabase Auth required.
+- **PlanetScale:** Postgres for all app data; migrations run with `MIGRATION_DATABASE_URL`, the app with `DATABASE_URL`.
+- **Supabase:** Realtime only; no Supabase Postgres or Supabase Auth required.
 - Set `BETTER_AUTH_URL` and `NEXT_PUBLIC_APP_URL` to your production URL.
 
 ## Out of Scope (This Milestone)
