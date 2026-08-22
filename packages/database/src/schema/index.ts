@@ -14,13 +14,14 @@
 //     tables in this database's `public` schema, and are excluded from
 //     drizzle-kit's diff by tablesFilter in drizzle.config.ts.
 //   - RLS policies — inert under Better Auth (they all read auth.uid(), which
-//     Supabase Auth no longer supplies), and superseded by the schema-level
-//     superseded by the isolation the bootstrap migration sets up (comm-canoe
-//     and reside are separate logical databases on one cluster, and neither
-//     role can CONNECT to the other's; tenant isolation *within* comm-canoe is
-//     application-layer only, with no RLS backstop). Full
-//     policy inventory is in notes.md so tenant-scoping behavior can be
-//     reimplemented in application code/tests.
+//     Supabase Auth no longer supplies) and bypassed regardless by the
+//     migration role's BYPASSRLS. What replaces them is split: isolation
+//     BETWEEN products comes from the bootstrap SQL, which puts comm-canoe and
+//     reside in separate logical databases on one cluster with neither role
+//     holding CONNECT on the other's; isolation BETWEEN TENANTS within
+//     comm-canoe is application-layer only, with no backstop underneath it,
+//     and src/services/tenant-isolation.test.ts is what the cutover traded the
+//     policies for.
 //   - get_user_tenant_ids() and the RLS-auto-enable event trigger — purely
 //     RLS-support plumbing with no application code path (see notes.md).
 //
@@ -60,9 +61,11 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * comm-canoe's private schema on the shared PlanetScale cluster (see
- * packages/database/drizzle/0000_bootstrap_schema_and_role.sql). reside owns
- * a sibling `reside` schema; there is deliberately no cross-schema FK.
+ * Everything below lives in `public`, inside comm-canoe's own logical database
+ * on the shared PlanetScale cluster (see
+ * packages/database/sql/00-bootstrap-database-and-role.sql). reside owns a
+ * sibling database, not a sibling schema, so a cross-product FK is not merely
+ * absent by convention — Postgres cannot express one across databases.
  */
 
 // ---------------------------------------------------------------------------
@@ -71,7 +74,8 @@ import {
 // Values reflect the final state after every `ALTER TYPE ... ADD VALUE` was
 // applied. One type was renamed in-place (call_transfer_outcome ->
 // live_transfer_outcome); the Postgres type — and therefore this enum —
-// carries only the final name. All enums live in the comm_canoe schema.
+// carries only the final name. All enums live in `public`, like everything
+// else here.
 // ---------------------------------------------------------------------------
 
 /** 20250620160000 (created) + 20250701001200 (added 'merged') */
