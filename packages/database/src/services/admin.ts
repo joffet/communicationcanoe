@@ -4,7 +4,7 @@ import { generateWidgetKey } from "./chat-session";
 import { createDb, type Db } from "../db";
 import { normalizeEmail, normalizePhone } from "../client";
 import { tenantSettings, tenants, userTenantMemberships, users } from "../schema";
-import type { PlatformRole, Tenant, UserRow } from "../types";
+import type { PlatformRole, Tenant, User } from "../types";
 
 export type AdminTenantRow = Tenant & {
   member_count: number;
@@ -16,7 +16,7 @@ export type AdminUserMembershipSummary = {
   role: "admin" | "member";
 };
 
-export type AdminUserRow = UserRow & {
+export type AdminUserRow = User & {
   memberships: AdminUserMembershipSummary[];
 };
 
@@ -205,7 +205,7 @@ export class AdminService {
     return users.find((u) => u.id === id) ?? null;
   }
 
-  async getUserByEmail(email: string): Promise<UserRow | null> {
+  async getUserByEmail(email: string): Promise<User | null> {
     const normalized = normalizeEmail(email);
     const [user] = await this.orm
       .select().from(users).where(eq(users.email, normalized)).limit(1);
@@ -217,7 +217,7 @@ export class AdminService {
     email: string;
     name?: string | null;
     platform_role?: PlatformRole;
-  }): Promise<UserRow> {
+  }): Promise<User> {
     const [user] = await this.orm
       .insert(users)
       .values({
@@ -238,7 +238,7 @@ export class AdminService {
       available_for_calls?: boolean;
       platform_role?: PlatformRole;
     },
-  ): Promise<UserRow> {
+  ): Promise<User> {
     // Built key by key rather than spread: an undefined field must mean "leave
     // it alone", and passing it through would null the column instead.
     const patch: Partial<{

@@ -16,7 +16,8 @@ Three kinds of thing are recorded here:
 1. **[What was collapsed away](#1-what-was-collapsed-away)** — objects that
    existed in migration history but not in the final schema.
 2. **[Discrepancies](#2-discrepancies)** — places where the migrations and
-   `types.ts` disagree. Numbered, because `index.ts` cites them by number.
+   `types.ts` disagreed. Both are fixed; the write-ups stay because `index.ts`
+   cites them by number and because the shape of each mistake is worth keeping.
 3. **[The RLS policy inventory](#3-rls-policy-inventory)** — every policy that
    existed at cutover, written down because the cutover dropped them and
    application code plus tests are what replace them.
@@ -190,10 +191,14 @@ competing source for them while making the explicit call site look redundant.
 
 Nothing needed changing to accommodate it. `createTenant`
 (`services/admin.ts`) was already supplying the key and already carried a
-comment saying why, and `TenantInsert` turns out to be a type nobody inserts
-through — it reaches the world only as a `TableDef` entry in the `Database`
-shape that parameterizes `SupabaseClient<Database>`, and that client is
-Realtime-only now.
+comment saying why, and `TenantInsert` turned out to be a type nobody inserted
+through — it reached the world only as a `TableDef` entry in the `Database`
+shape that parameterized `SupabaseClient<Database>`.
+
+**`TenantInsert` no longer exists.** Chasing why it was inert led to deleting
+that whole snake_case surface — see §2.1. The fix above was still the right
+one: it is what established that no caller depended on the field being
+optional, which is what made the deletion safe to attempt.
 
 `tenants.reside_client_uid` has the identical history (added nullable,
 backfilled from `id::text`, set `NOT NULL`, no default) and was always marked
@@ -226,12 +231,18 @@ and accepts `camelCase` on insert. Incoherent, and the only table in the file
 where that was true. It never broke anything because nothing reads or writes
 tables through the supabase client any more — it is Realtime-only.
 
-**Resolution: the two shapes are separate types.**
+**Resolution: the two shapes were separated.**
 
 | Type | Shape | Consumer |
 |---|---|---|
-| `DocumentChunkInsert` | snake_case literal, matches `DocumentChunkRow` and all 22 siblings | `TableDef` / the `Database` shape |
+| `DocumentChunkInsert` | snake_case literal, matching `DocumentChunkRow` and all 22 siblings | `TableDef` / the `Database` shape |
 | `NewDocumentChunk` | `typeof documentChunks.$inferInsert` — camelCase, `Date` | `insertDocumentChunks` |
+
+`DocumentChunkInsert` was deleted days later along with the rest of the
+snake_case surface (§2.1), so only `NewDocumentChunk` survives. Separating them
+first was not wasted work: it is what made the `Database` half legible as
+something with no consumer, rather than something one service still depended
+on.
 
 `DocumentChunk` was corrected in the same pass. It aliased `DocumentChunkRow`
 (snake_case) while the adjacent `Document` is `typeof documents.$inferSelect`
@@ -243,6 +254,56 @@ beside it would have made the pair actively misleading.
 The convention this restores, and the one to keep following: **bare noun =
 Drizzle shape** (`Document`, `DocumentChunk`, `NewDocumentChunk`), **`*Row` /
 `*Insert` = snake_case supabase shape**.
+
+### 2.1 The snake_case surface, and its deletion
+
+Both discrepancies above were symptoms of one thing: `types.ts` maintained a
+hand-written snake_case mirror of the database alongside the Drizzle-derived
+types, and the mirror had no way to stay correct.
+
+The mirror was 23 `Row`/`Insert` pairs, a `TableDef<Row, Insert>` wrapper, a
+`DatabaseFunctions` map of RPC signatures, and the `Database` type composing
+them. Its only purpose was to parameterize `SupabaseClient<Database>` so that
+`.from("tenants").select()` and `.rpc("resolve_identity_id", …)` came back
+typed.
+
+By the end of the cutover there were **no `.from()` calls and no `.rpc()` calls
+left anywhere in the repo**. The supabase client is reached through one
+`protected get db()` on `DomainService`, used in exactly three places, all of
+them `channel()` or `removeChannel()` for Realtime. The RPCs are still called —
+`identity_merge_chain_ids` and friends — but through Drizzle raw SQL now
+(`this.orm.execute()` with a raw `sql` template), not the supabase client, so
+`DatabaseFunctions` typed nothing either.
+
+So roughly 580 lines described a query surface with no callers, in a casing
+nothing else in the package speaks, and every hand-written line of it was a
+place where the types could drift from the schema without anything noticing.
+Discrepancy #1 is exactly that drift. It is deleted.
+
+What survived, and why:
+
+- **`TenantSettingsRow` → `TenantSettings`** and **`UserRow` → `User`**. Both
+  were already `$inferSelect` despite the `*Row` name; with the snake_case
+  shapes gone the suffix distinguished nothing and actively contradicted the
+  convention. Renamed to match every other table type.
+- **`PlatformRole`, `ConversationPriority`, `MessageDeliveryStatus`** — string
+  unions with live importers.
+- Every `$inferSelect` type, `NewDocumentChunk`, and the composites
+  (`ConversationThread`, `ConversationWithIdentity`, `ConversationExtras`,
+  `ConversationViewerState`).
+
+`AppSupabaseClient` is now bare `SupabaseClient`. Four string unions
+(`MessageVisibility`, `MessageAiReviewStatus`, `MessageTopicCheckStatus`,
+`MessageTranscriptionStatus`) went too — `@communication-canoe/shared` defines
+its own copies and those are what everything imports.
+
+One live bug fell out of the rename. `updateTenantSettings` typed its patch as
+`Partial<Omit<TenantSettingsRow, "tenant_id" | "updated_at">>`, but the type's
+keys are `tenantId`/`updatedAt`, so the `Omit` matched nothing and removed
+nothing. A caller could have passed `tenantId` and had it spread into both the
+`values()` and the `onConflictDoUpdate` `set` — writing another tenant's id
+onto the primary key. The only caller passes neither field, so it never fired.
+Now `Omit<TenantSettings, "tenantId" | "updatedAt">`.
 
 ### Non-discrepancies
 

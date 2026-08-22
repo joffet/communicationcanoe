@@ -2,13 +2,15 @@
 -- Applied after drizzle-kit's generated table DDL: every one of these
 -- references a table by name, so the tables must exist first.
 --
--- These are not decoration. The .rpc() functions are called directly by
--- services/index.ts, and the triggers fire regardless of which code path
+-- These are not decoration. The functions are called from services/index.ts
+-- via this.orm.execute() with a raw SQL template - not supabase-js .rpc(),
+-- which nothing in this codebase uses any more - and the triggers fire
+-- regardless of which code path
 -- inserted the row - which is the whole point of the document_chunks one,
 -- since it is the only tenant guard here that application code cannot skip.
 
--- Resolve canonical identity (follow merge chain). Called via
--- `.rpc("resolve_identity_id", ...)` in services/index.ts.
+-- Resolve canonical identity (follow merge chain). Called from
+-- DomainService.resolveIdentityId.
 CREATE OR REPLACE FUNCTION resolve_identity_id(p_identity_id UUID)
 RETURNS UUID
 LANGUAGE plpgsql
@@ -29,8 +31,8 @@ $$;
 
 -- Given any identity id, return every id whose merge chain transitively
 -- terminates at its canonical id (multi-hop aware, unlike a single-level
--- `WHERE merged_into_id = canonical`). Called via
--- `.rpc("identity_merge_chain_ids", ...)`.
+-- `WHERE merged_into_id = canonical`). Called from
+-- DomainService.getIdentityMergeChainIds.
 CREATE OR REPLACE FUNCTION identity_merge_chain_ids(p_identity_id UUID)
 RETURNS SETOF UUID
 LANGUAGE plpgsql
@@ -50,7 +52,7 @@ END;
 $$;
 
 -- Structural copy of resolve_identity_id for conversations (admin-triggered
--- conversation merge). Called via `.rpc("resolve_conversation_id", ...)`.
+-- conversation merge). Called from DomainService.resolveConversationId.
 CREATE OR REPLACE FUNCTION resolve_conversation_id(p_conversation_id UUID)
 RETURNS UUID
 LANGUAGE plpgsql
@@ -69,8 +71,8 @@ BEGIN
 END;
 $$;
 
--- Structural copy of identity_merge_chain_ids for conversations. Called via
--- `.rpc("conversation_merge_chain_ids", ...)`.
+-- Structural copy of identity_merge_chain_ids for conversations. Called from
+-- DomainService.getConversationMergeChainIds.
 CREATE OR REPLACE FUNCTION conversation_merge_chain_ids(p_conversation_id UUID)
 RETURNS SETOF UUID
 LANGUAGE plpgsql
@@ -94,8 +96,7 @@ $$;
 -- src/schema/index.ts, and src/schema/notes.md section 5) — an approximate
 -- index can silently under-return a small tenant's results once a larger
 -- tenant has loaded many chunks, which this feature would never surface as an
--- error. Called via
--- `.rpc("match_document_chunks", ...)`.
+-- error. Called from DomainService.findSimilarChunks.
 CREATE OR REPLACE FUNCTION match_document_chunks(
   p_tenant_id UUID,
   p_query_embedding VECTOR(1536),

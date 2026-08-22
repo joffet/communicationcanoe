@@ -61,7 +61,7 @@ import type {
   Tag,
   Team,
   Tenant,
-  TenantSettingsRow,
+  TenantSettings,
 } from "../types";
 
 /** Strips repeated Re:/Fwd:/FW: prefixes and normalizes whitespace/case, so
@@ -2197,8 +2197,8 @@ export class DomainService {
    * setter in this codebase. */
   async updateTenantSettings(
     tenantId: string,
-    patch: Partial<Omit<TenantSettingsRow, "tenant_id" | "updated_at">>,
-  ): Promise<TenantSettingsRow> {
+    patch: Partial<Omit<TenantSettings, "tenantId" | "updatedAt">>,
+  ): Promise<TenantSettings> {
     const [settings] = await this.orm
       .insert(tenantSettings)
       .values({ tenantId, ...patch, updatedAt: new Date() })
