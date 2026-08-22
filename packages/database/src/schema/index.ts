@@ -188,9 +188,10 @@ export const tenants = pgTable(
     inboundEmailAddress: text("inbound_email_address").notNull(),
     /**
      * 20250621140000: added nullable, backfilled with gen_random_uuid()::text,
-     * then SET NOT NULL. No DB-level DEFAULT was ever attached — see
-     * notes.md discrepancy #1 (types.ts marks this optional on insert; the
-     * DB will reject an insert that omits it).
+     * then SET NOT NULL. No DB-level DEFAULT was ever attached, so every
+     * insert must supply a key — createTenant does, via generateWidgetKey().
+     * types.ts marked this optional on insert until notes.md discrepancy #1
+     * was fixed; do not add a DEFAULT here to make it optional again.
      */
     chatWidgetKey: text("chat_widget_key").notNull(),
     /** 20250625090000 */

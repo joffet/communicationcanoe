@@ -85,7 +85,7 @@ Two columns were added nullable, backfilled, then made `NOT NULL` in the same
 migration. `index.ts` shows only `.notNull()`, which is correct for the end
 state but hides that **none of them has a database-level `DEFAULT`** — the
 backfill was a one-time `UPDATE`, not a default that keeps applying. See
-[discrepancy #1](#discrepancy-1--tenantschat_widget_key-is-optional-on-insert).
+[discrepancy #1](#discrepancy-1--tenantschat_widget_key-was-optional-on-insert--fixed).
 
 | Column | Backfilled with | Migration |
 |---|---|---|
@@ -162,9 +162,9 @@ cutover settled the question the other way. See section 3.
 Between the migrations and `types.ts`. `index.ts` cites these by number, so the
 numbering is stable — append, do not renumber.
 
-### Discrepancy #1 — `tenants.chat_widget_key` is optional on insert
+### Discrepancy #1 — `tenants.chat_widget_key` was optional on insert — **fixed**
 
-`TenantInsert` in [`../types.ts`](../types.ts) declares:
+`TenantInsert` in [`../types.ts`](../types.ts) declared:
 
 ```ts
 chat_widget_key?: string;
@@ -173,21 +173,32 @@ chat_widget_key?: string;
 The column is `NOT NULL` with **no database default**. It was added nullable,
 backfilled with `gen_random_uuid()::text` as a one-time `UPDATE`, and then set
 `NOT NULL` (`20250621140000`) — the `gen_random_uuid()` never became a
-`DEFAULT`. An insert that omits it is rejected by Postgres, and the type says it
-is fine.
+`DEFAULT`. An insert that omitted it would be rejected by Postgres, and the type
+said it was fine.
 
 This originated in supabase-generated types, which mark a column optional on
 insert whenever it is nullable *or* has a default, and it survived into the
-hand-written `types.ts` unchanged. It is latent rather than live: every tenant
-creation path supplies a widget key today. Fixing it means making the field
-required in `TenantInsert`, or attaching a real `DEFAULT gen_random_uuid()::text`
-to the column — the second is a schema change and needs a migration, so it is
-not a drive-by.
+hand-written `types.ts` unchanged.
 
-`tenants.reside_client_uid` has the identical shape (added nullable, backfilled
-from `id::text`, set `NOT NULL`, no default) but `TenantInsert` marks it
-**required**, which is correct. The two columns disagreeing is what makes #1
-look like an oversight rather than a decision.
+**Resolution: the field is now required.** Of the two options, this is the one
+that made the type tell the truth about the database. The alternative — adding
+`DEFAULT gen_random_uuid()::text` to the column — would have changed the
+database to match the type, which is backwards here: widget keys are generated
+in application code on purpose (`generateWidgetKey()` in
+`services/chat-session.ts`), and a database default would create a second,
+competing source for them while making the explicit call site look redundant.
+
+Nothing needed changing to accommodate it. `createTenant`
+(`services/admin.ts`) was already supplying the key and already carried a
+comment saying why, and `TenantInsert` turns out to be a type nobody inserts
+through — it reaches the world only as a `TableDef` entry in the `Database`
+shape that parameterizes `SupabaseClient<Database>`, and that client is
+Realtime-only now.
+
+`tenants.reside_client_uid` has the identical history (added nullable,
+backfilled from `id::text`, set `NOT NULL`, no default) and was always marked
+required. The two disagreeing is what made #1 look like an oversight rather
+than a decision, and it was.
 
 ### Discrepancy #2 — `DocumentChunkInsert` is derived, every other Insert is hand-written
 

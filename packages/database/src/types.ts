@@ -109,7 +109,14 @@ export type TenantInsert = {
   name: string;
   twilio_number: string;
   inbound_email_address: string;
-  chat_widget_key?: string;
+  /** Required, unlike most `?` fields here: the column is NOT NULL with no
+   * database default. It was added nullable, backfilled once with
+   * gen_random_uuid()::text, then SET NOT NULL (20250621140000) - the
+   * backfill never became a DEFAULT. supabase-generated types marked it
+   * optional because it was nullable at generation time; an insert that
+   * omits it is rejected by Postgres. createTenant supplies it via
+   * generateWidgetKey(). */
+  chat_widget_key: string;
   provisioning_source?: TenantProvisioningSource;
   reside_client_uid: string;
   reside_app_url?: string | null;
