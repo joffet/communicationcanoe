@@ -15,9 +15,15 @@ import {
 import { sessionManager } from "./session-manager.js";
 import { handleChatTransfer } from "../handoff/chat-handoff.js";
 
-const DEFAULT_INSTRUCTIONS = `You are a helpful customer support assistant for a business.
+// transfer_to_human requires a conversation_id the model has no other way to
+// know, so it is baked into the instructions. Without it the model stalls
+// asking the visitor for an ID they cannot see, and the transfer never fires -
+// even though handleChatTransfer ignores the argument and uses this.conversationId.
+const buildInstructions = (conversationId: string) =>
+  `You are a helpful customer support assistant for a business.
 Be concise and friendly. If the visitor wants a human, use transfer_to_human.
-If they share contact details, use capture_contact_info.`;
+If they share contact details, use capture_contact_info.
+The conversation_id for this chat is ${conversationId}; always pass it to transfer_to_human.`;
 
 export class ChatSession {
   private domain = createDomainService();
@@ -61,7 +67,7 @@ export class ChatSession {
     this.realtime = new OpenAIRealtimeClient({
       apiKey: this.config.apiKey,
       mode: "text",
-      instructions: DEFAULT_INSTRUCTIONS,
+      instructions: buildInstructions(this.conversationId),
       onTextDelta: (delta) => {
         this.pendingAiText += delta;
       },
