@@ -13,7 +13,7 @@ export type RealtimeClientOptions = {
   onError?: (error: Error) => void;
 };
 
-const REALTIME_MODEL = "gpt-4o-realtime-preview-2024-12-17";
+const REALTIME_MODEL = "gpt-realtime-2.1";
 
 export class OpenAIRealtimeClient {
   private ws: WebSocket | null = null;
@@ -23,10 +23,12 @@ export class OpenAIRealtimeClient {
 
   async connect(): Promise<void> {
     const url = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`;
+    // No OpenAI-Beta header: sending "realtime=v1" selects the retired Beta
+    // protocol, which now rejects the connection outright. Its absence is what
+    // selects GA, so the rest of this file speaks the GA event vocabulary.
     this.ws = new WebSocket(url, {
       headers: {
         Authorization: `Bearer ${this.options.apiKey}`,
-        "OpenAI-Beta": "realtime=v1",
       },
     });
 
@@ -41,9 +43,12 @@ export class OpenAIRealtimeClient {
       this.options.onError?.(err instanceof Error ? err : new Error(String(err))),
     );
 
-    const modalities = this.options.mode === "voice" ? ["audio", "text"] : ["text"];
+    // GA accepts only ["text"] or ["audio"] - the Beta protocol's ["audio",
+    // "text"] pair is rejected. Audio responses still carry a transcript, via
+    // the separate response.output_audio_transcript.* events.
     const session: Record<string, unknown> = {
-      modalities,
+      type: "realtime",
+      output_modalities: this.options.mode === "voice" ? ["audio"] : ["text"],
       instructions: this.options.instructions,
       tools: getToolsForMode(this.options.mode).map((t) => ({
         type: "function",
@@ -55,10 +60,19 @@ export class OpenAIRealtimeClient {
     };
 
     if (this.options.mode === "voice") {
-      session.input_audio_format = "g711_ulaw";
-      session.output_audio_format = "g711_ulaw";
-      session.voice = "alloy";
-      session.turn_detection = { type: "server_vad" };
+      // GA nests audio config under session.audio and takes formats as objects
+      // rather than the flat input_audio_format/output_audio_format strings.
+      // "audio/pcmu" is GA's name for g711_ulaw, which is what Twilio streams.
+      session.audio = {
+        input: {
+          format: { type: "audio/pcmu" },
+          turn_detection: { type: "server_vad" },
+        },
+        output: {
+          format: { type: "audio/pcmu" },
+          voice: "alloy",
+        },
+      };
     }
 
     this.send({ type: "session.update", session });
@@ -112,19 +126,19 @@ export class OpenAIRealtimeClient {
 
     const type = event.type as string;
 
-    if (type === "response.text.delta") {
+    if (type === "response.output_text.delta") {
       const delta = (event.delta as string) ?? "";
       this.textBuffer += delta;
       this.options.onTextDelta?.(delta);
     }
 
-    if (type === "response.text.done") {
+    if (type === "response.output_text.done") {
       const text = (event.text as string) ?? this.textBuffer;
       this.textBuffer = "";
       this.options.onTextDone?.(text);
     }
 
-    if (type === "response.audio.delta") {
+    if (type === "response.output_audio.delta") {
       this.options.onAudioDelta?.((event.delta as string) ?? "");
     }
 
