@@ -12,13 +12,17 @@ export const TRANSFER_TO_HUMAN_TOOL: RealtimeToolDefinition = {
   name: "transfer_to_human",
   description:
     "Transfer the conversation to a human team member when the customer requests it or escalation is needed.",
+  // No conversation_id argument: both sessions already know which conversation
+  // they are bound to, and nothing ever tells the model a real one - so the
+  // argument could only ever carry a value the model invented or a caller
+  // suggested, while deciding which conversation the transfer is logged
+  // against. `reason` is the model's own account, which is what it can supply.
   parameters: {
     type: "object",
     properties: {
       reason: { type: "string", description: "Why the transfer is needed" },
-      conversation_id: { type: "string", description: "The conversation UUID" },
     },
-    required: ["reason", "conversation_id"],
+    required: ["reason"],
   },
 };
 
@@ -45,7 +49,6 @@ export function getToolsForMode(mode: RealtimeMode): RealtimeToolDefinition[] {
 
 export type TransferToHumanArgs = {
   reason: string;
-  conversation_id: string;
 };
 
 export type CaptureContactInfoArgs = {

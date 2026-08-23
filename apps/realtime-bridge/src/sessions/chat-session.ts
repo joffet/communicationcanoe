@@ -15,15 +15,9 @@ import {
 import { sessionManager } from "./session-manager.js";
 import { handleChatTransfer } from "../handoff/chat-handoff.js";
 
-// transfer_to_human requires a conversation_id the model has no other way to
-// know, so it is baked into the instructions. Without it the model stalls
-// asking the visitor for an ID they cannot see, and the transfer never fires -
-// even though handleChatTransfer ignores the argument and uses this.conversationId.
-const buildInstructions = (conversationId: string) =>
-  `You are a helpful customer support assistant for a business.
+const DEFAULT_INSTRUCTIONS = `You are a helpful customer support assistant for a business.
 Be concise and friendly. If the visitor wants a human, use transfer_to_human.
-If they share contact details, use capture_contact_info.
-The conversation_id for this chat is ${conversationId}; always pass it to transfer_to_human.`;
+If they share contact details, use capture_contact_info.`;
 
 export class ChatSession {
   private domain = createDomainService();
@@ -67,7 +61,7 @@ export class ChatSession {
     this.realtime = new OpenAIRealtimeClient({
       apiKey: this.config.apiKey,
       mode: "text",
-      instructions: buildInstructions(this.conversationId),
+      instructions: DEFAULT_INSTRUCTIONS,
       onTextDelta: (delta) => {
         this.pendingAiText += delta;
       },
@@ -141,7 +135,12 @@ export class ChatSession {
     if (name === "transfer_to_human") {
       const input = args as TransferToHumanArgs;
       await handleChatTransfer(this, input.reason);
-      this.realtime.submitToolOutput(callId, JSON.stringify({ success: true }));
+      // beginHandoff closes the realtime client and nulls it out - the AI leg
+      // is over, so nothing is left to submit the output to. Dereferencing it
+      // unconditionally threw, and onToolCall's floating `void` turned that
+      // into an unhandled rejection: with no handler registered, every
+      // successful chat transfer took the bridge process down with it.
+      this.realtime?.submitToolOutput(callId, JSON.stringify({ success: true }));
     }
   }
 
