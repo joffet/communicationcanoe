@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createAdminService, createDomainService } from "@communication-canoe/database";
+import { asResideClientUid, createAdminService, createDomainService } from "@communication-canoe/database";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
 
 export async function GET(request: Request, { params }: { params: Promise<{ batchId: string }> }) {
@@ -23,7 +23,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ batc
   // uuid, so it has to be resolved rather than compared directly - the same
   // step the cancel and approve routes make for the same reason.
   const url = new URL(request.url);
-  const resideClientUidParsed = z.string().min(1).safeParse(url.searchParams.get("tenantId"));
+  const resideClientUidParsed = z.string().min(1).transform(asResideClientUid).safeParse(url.searchParams.get("tenantId"));
   if (!resideClientUidParsed.success) {
     return Response.json({ error: "tenantId is required" }, { status: 400 });
   }

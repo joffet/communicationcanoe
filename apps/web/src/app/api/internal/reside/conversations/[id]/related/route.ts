@@ -1,4 +1,4 @@
-import { createDomainService, toResideConversation } from "@communication-canoe/database";
+import { asResideClientUid, createDomainService, toResideConversation } from "@communication-canoe/database";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
 import { resolveTenantScopedConversation } from "@/lib/reside/conversation-guard";
 
@@ -14,12 +14,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return Response.json({ error: "tenantId is required" }, { status: 400 });
   }
 
-  const guard = await resolveTenantScopedConversation(tenantId, id);
+  const guard = await resolveTenantScopedConversation(asResideClientUid(tenantId), id);
   if (!guard.ok) return new Response("Unknown conversation", { status: guard.status });
 
   // Read-only, no actor - surfaces this resident's other conversations
   // (across their full identity merge-chain) as candidates for the
   // Phase 7 merge action.
-  const conversations = await createDomainService().listRelatedConversations(tenantId, guard.conversation.id);
+  //
+  // `guard.tenant.id`, not the `tenantId` query parameter: that parameter
+  // carries reside's client uid, which for the production client is the slug
+  // "cardiff" - this call compares it against a uuid column.
+  const conversations = await createDomainService().listRelatedConversations(
+    guard.tenant.id,
+    guard.conversation.id,
+  );
   return Response.json({ conversations: conversations.map(toResideConversation) });
 }

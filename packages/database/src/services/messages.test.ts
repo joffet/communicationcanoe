@@ -4,6 +4,7 @@ import { DomainService } from "./index";
 import type { AppSupabaseClient } from "../client";
 import { createTestDb, resetTestDb, type TestDb } from "../testing/pglite";
 import { conversations, identities, messages, tenantSettings, tenants } from "../schema";
+import { asResideClientUid, type TenantId } from "@communication-canoe/shared/brands";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -25,7 +26,7 @@ beforeEach(async () => {
 async function seed() {
   const [tenant] = await db.insert(tenants).values({
     name: "Tenant", twilioNumber: "+15550000001",
-    inboundEmailAddress: "t@example.test", chatWidgetKey: "key", resideClientUid: "client",
+    inboundEmailAddress: "t@example.test", chatWidgetKey: "key", resideClientUid: asResideClientUid("client"),
   }).returning();
   const [identity] = await db.insert(identities).values({
     tenantId: tenant.id, email: "customer@example.test",
@@ -36,7 +37,7 @@ async function seed() {
   return { tenant, identity, conversation };
 }
 
-function baseMessage(tenantId: string, conversationId: string) {
+function baseMessage(tenantId: TenantId, conversationId: string) {
   return {
     tenantId, conversationId,
     channel: "email" as const,

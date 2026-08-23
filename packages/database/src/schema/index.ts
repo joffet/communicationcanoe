@@ -62,6 +62,7 @@ import {
   primaryKey,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import type { ResideClientUid, TenantId } from "@communication-canoe/shared/brands";
 
 /**
  * Everything below lives in `public`, inside comm-canoe's own logical database
@@ -182,7 +183,7 @@ export const conversationPriorityEnum = pgEnum("conversation_priority", [
 export const tenants = pgTable(
   "tenants",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: uuid("id").$type<TenantId>().primaryKey().defaultRandom(),
     name: text("name").notNull(),
     twilioNumber: text("twilio_number").notNull(),
     inboundEmailAddress: text("inbound_email_address").notNull(),
@@ -204,7 +205,7 @@ export const tenants = pgTable(
      * this schema still points at `id`, never at this column. Backfilled
      * from `id::text` for pre-existing rows; no DB default going forward.
      */
-    resideClientUid: text("reside_client_uid").notNull(),
+    resideClientUid: text("reside_client_uid").$type<ResideClientUid>().notNull(),
     /** 20250701002400 — null falls back to the RESIDE_APP_URL env var */
     resideAppUrl: text("reside_app_url"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -237,6 +238,7 @@ export const tenants = pgTable(
 
 export const tenantSettings = pgTable("tenant_settings", {
   tenantId: uuid("tenant_id")
+    .$type<TenantId>()
     .primaryKey()
     .references(() => tenants.id, { onDelete: "cascade" }),
   greetingMessage: text("greeting_message"),
@@ -315,6 +317,7 @@ export const userTenantMemberships = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     tenantId: uuid("tenant_id")
+      .$type<TenantId>()
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     role: tenantRoleEnum("role").notNull().default("member"),
@@ -337,6 +340,7 @@ export const teams = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
+      .$type<TenantId>()
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
@@ -381,6 +385,7 @@ export const identities = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
+      .$type<TenantId>()
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     phone: text("phone"),
@@ -444,6 +449,7 @@ export const identityMergeLogs = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
+      .$type<TenantId>()
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     identityAId: uuid("identity_a_id")
@@ -475,6 +481,7 @@ export const identityConversionLogs = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
+      .$type<TenantId>()
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     identityId: uuid("identity_id")
@@ -507,6 +514,7 @@ export const conversations = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
+      .$type<TenantId>()
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     identityId: uuid("identity_id")
@@ -575,6 +583,7 @@ export const messages = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
+      .$type<TenantId>()
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     conversationId: uuid("conversation_id")
@@ -662,6 +671,7 @@ export const liveTransfers = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
+      .$type<TenantId>()
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     conversationId: uuid("conversation_id")
@@ -709,6 +719,7 @@ export const liveTransfers = pgTable(
 export const outboundBatches = pgTable("outbound_batches", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: uuid("tenant_id")
+      .$type<TenantId>()
     .notNull()
     .references(() => tenants.id, { onDelete: "cascade" }),
   channel: messageChannelEnum("channel").notNull(),
@@ -737,6 +748,7 @@ export const outboundBatchRecipients = pgTable(
       .notNull()
       .references(() => outboundBatches.id, { onDelete: "cascade" }),
     tenantId: uuid("tenant_id")
+      .$type<TenantId>()
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     channel: messageChannelEnum("channel").notNull(),
@@ -782,6 +794,7 @@ export const tags = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
+      .$type<TenantId>()
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
@@ -891,6 +904,7 @@ export const conversationSplits = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
+      .$type<TenantId>()
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     sourceConversationId: uuid("source_conversation_id")
@@ -981,6 +995,7 @@ export const documents = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
+      .$type<TenantId>()
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     filename: text("filename").notNull(),
@@ -1044,6 +1059,7 @@ export const documentChunks = pgTable(
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),
     tenantId: uuid("tenant_id")
+      .$type<TenantId>()
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     chunkIndex: integer("chunk_index").notNull(),

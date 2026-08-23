@@ -1,11 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TRANSFER_TO_HUMAN_TOOL } from "@communication-canoe/shared/realtime";
 import type { BridgeConfig } from "../config.js";
+import type { TenantId } from "@communication-canoe/database";
+
+/** A real uuid: VoiceSession shape-checks the tenant id Twilio replays, so a
+ * bare "tenant-1" placeholder would be rejected at that boundary and these
+ * tests would exercise the tenantless path instead of the one they name. */
+const TENANT_ID = "11111111-1111-4111-8111-111111111111" as TenantId;
 
 const logLiveTransfer = vi.fn();
 const getOnCallUsers = vi.fn();
 
-vi.mock("@communication-canoe/database", () => ({
+// Spreads the real brand helpers in rather than restating them. VoiceSession
+// shape-checks the tenant id Twilio replays, and a hand-rolled isTenantId stub
+// would let this test pass against a rule the real one enforces. brands.ts has
+// no dependencies of its own, so pulling it in here costs nothing.
+vi.mock("@communication-canoe/database", async () => ({
+  ...(await import("@communication-canoe/shared/brands")),
   createDomainService: () => ({
     logLiveTransfer,
     getOnCallUsers,
@@ -104,7 +115,7 @@ describe("the transfer_to_human declaration", () => {
 describe("VoiceSession transfer_to_human", () => {
   it("logs the transfer against the conversation the stream named", async () => {
     const session = await startVoiceSession({
-      tenantId: "tenant-1",
+      tenantId: TENANT_ID,
       conversationId: "conversation-1",
     });
 
@@ -113,7 +124,7 @@ describe("VoiceSession transfer_to_human", () => {
 
     expect(logLiveTransfer).toHaveBeenCalledTimes(1);
     expect(logLiveTransfer.mock.calls[0][0]).toMatchObject({
-      tenantId: "tenant-1",
+      tenantId: TENANT_ID,
       conversationId: "conversation-1",
     });
 
@@ -124,7 +135,7 @@ describe("VoiceSession transfer_to_human", () => {
     // The stream carried a tenant but no conversation - the only state in which
     // the old `this.conversationId ?? input.conversation_id` fallback could
     // fire, handing the model's id straight to logLiveTransfer.
-    const session = await startVoiceSession({ tenantId: "tenant-1" });
+    const session = await startVoiceSession({ tenantId: TENANT_ID });
 
     fireTransferNaming("conversation-of-another-tenant");
     await settle();
@@ -143,7 +154,7 @@ describe("ChatSession transfer_to_human", () => {
   it("logs the transfer against the conversation the session is bound to", async () => {
     const session = new ChatSession(
       fakeWs(),
-      "tenant-1",
+      TENANT_ID,
       "conversation-1",
       "identity-1",
       "session-token-1",
@@ -156,7 +167,7 @@ describe("ChatSession transfer_to_human", () => {
 
     expect(logLiveTransfer).toHaveBeenCalledTimes(1);
     expect(logLiveTransfer.mock.calls[0][0]).toMatchObject({
-      tenantId: "tenant-1",
+      tenantId: TENANT_ID,
       conversationId: "conversation-1",
     });
 
@@ -166,7 +177,7 @@ describe("ChatSession transfer_to_human", () => {
   it("does not throw when the handoff has already closed the realtime client", async () => {
     const session = new ChatSession(
       fakeWs(),
-      "tenant-1",
+      TENANT_ID,
       "conversation-1",
       "identity-1",
       "session-token-1",

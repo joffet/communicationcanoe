@@ -1,10 +1,11 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import type { ResideClientUid } from "@communication-canoe/database";
 
 export type ResideSsoClaims = {
   externalUserId: string;
   email: string;
   name: string;
-  resideClientUid: string;
+  resideClientUid: ResideClientUid;
   role?: "admin" | "user" | "super";
   iat: number;
   exp: number;

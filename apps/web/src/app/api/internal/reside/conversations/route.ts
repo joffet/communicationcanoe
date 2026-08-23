@@ -1,8 +1,7 @@
-import {
+import { asResideClientUid,
   createAdminService,
   createDomainService,
-  toResideConversation,
-} from "@communication-canoe/database";
+  toResideConversation, } from "@communication-canoe/database";
 import { CONVERSATION_STATUSES } from "@communication-canoe/shared/constants";
 import { z } from "zod";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
@@ -18,7 +17,7 @@ export async function GET(request: Request) {
   // uuid. It is only ever compared against the text reside_client_uid column,
   // so no uuid shape check applies (and none is needed to keep it out of a
   // uuid comparison, which was the original reason for validating here).
-  const resideClientUidParsed = z.string().min(1).safeParse(url.searchParams.get("tenantId"));
+  const resideClientUidParsed = z.string().min(1).transform(asResideClientUid).safeParse(url.searchParams.get("tenantId"));
   if (!resideClientUidParsed.success) {
     return Response.json({ error: "tenantId is required" }, { status: 400 });
   }

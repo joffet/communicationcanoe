@@ -11,6 +11,7 @@ import {
   tenants,
   users,
 } from "../schema";
+import { asResideClientUid, type TenantId } from "@communication-canoe/shared/brands";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -35,7 +36,7 @@ beforeEach(async () => {
 async function seed() {
   const [tenant] = await db.insert(tenants).values({
     name: "Tenant", twilioNumber: "+15550000001",
-    inboundEmailAddress: "t@example.test", chatWidgetKey: "key", resideClientUid: "client",
+    inboundEmailAddress: "t@example.test", chatWidgetKey: "key", resideClientUid: asResideClientUid("client"),
   }).returning();
   await db.insert(users).values([
     { id: VIEWER, email: "viewer@example.test", name: "Viewer" },
@@ -48,7 +49,7 @@ async function seed() {
 }
 
 async function makeConversation(
-  tenantId: string, identityId: string,
+  tenantId: TenantId, identityId: string,
   opts: { lastMessageAt: Date; status?: "open" | "pending" | "resolved" | "merged" },
 ) {
   const [conversation] = await db.insert(conversations).values({

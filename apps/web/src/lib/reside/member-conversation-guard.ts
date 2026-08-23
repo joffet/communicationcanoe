@@ -1,6 +1,7 @@
 import { createAdminService, createDomainService } from "@communication-canoe/database";
 import type { ConversationThread } from "@communication-canoe/database";
 import { z } from "zod";
+import type { ResideClientUid, TenantId } from "@communication-canoe/database";
 
 const uuidSchema = z.string().uuid();
 
@@ -27,7 +28,7 @@ export type MemberConversationThread = {
  * since creating an identity for a genuinely first-time contact is
  * legitimate there. */
 export async function findResidentIdentity(
-  tenantId: string,
+  tenantId: TenantId,
   contact: { phone?: string; email?: string },
 ) {
   return createDomainService().findIdentityForContact(tenantId, contact);
@@ -91,7 +92,7 @@ export type MemberConversationGuardResult =
  * distinguishing "no such conversation" from "wrong resident" from "unknown
  * tenant", matching Phase 3's conversation-guard.ts precedent exactly. */
 export async function resolveOwnedConversation(
-  resideClientUid: string,
+  resideClientUid: ResideClientUid,
   conversationId: string,
   identityId: string,
 ): Promise<MemberConversationGuardResult> {

@@ -1,6 +1,7 @@
 import { createAdminService, createDomainService } from "@communication-canoe/database";
 import type { ConversationThread, Tenant } from "@communication-canoe/database";
 import { z } from "zod";
+import type { ResideClientUid } from "@communication-canoe/database";
 
 const uuidSchema = z.string().uuid();
 
@@ -27,7 +28,7 @@ export type ConversationGuardResult =
  * scoping below uses the resolved `tenant.id`, never this value.
  */
 export async function resolveTenantScopedConversation(
-  resideClientUid: string,
+  resideClientUid: ResideClientUid,
   conversationId: string,
 ): Promise<ConversationGuardResult> {
   if (!uuidSchema.safeParse(conversationId).success) {

@@ -1,6 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type WebSocket from "ws";
-import { createDomainService } from "@communication-canoe/database";
+import { type TenantId, createDomainService } from "@communication-canoe/database";
 import type {
   ChatWidgetClientMessage,
   ChatWidgetInitMessage,
@@ -148,7 +148,7 @@ async function initChatSession(
 
 async function createNewSession(
   domain: ReturnType<typeof createDomainService>,
-  tenantId: string,
+  tenantId: TenantId,
   msg: ChatWidgetInitMessage,
 ) {
   // Phase 9: web_chat sessions ignore isStale - they're pinned once
@@ -190,7 +190,7 @@ async function createNewSession(
 
 export function handleHandoffJoin(body: {
   conversationId: string;
-  tenantId: string;
+  tenantId: TenantId;
   agentUserId: string;
   agentName?: string;
 }) {

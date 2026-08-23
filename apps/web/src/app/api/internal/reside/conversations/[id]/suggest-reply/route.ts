@@ -1,4 +1,4 @@
-import { createDomainService } from "@communication-canoe/database";
+import { asResideClientUid, createDomainService } from "@communication-canoe/database";
 import { createEmbeddingProvider, suggestReply } from "@communication-canoe/shared/ai";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
 import { resolveTenantScopedConversation } from "@/lib/reside/conversation-guard";
@@ -21,7 +21,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return Response.json({ error: "tenantId is required" }, { status: 400 });
   }
 
-  const guard = await resolveTenantScopedConversation(resideClientUid, id);
+  const guard = await resolveTenantScopedConversation(asResideClientUid(resideClientUid), id);
   if (!guard.ok) return new Response("Unknown conversation", { status: guard.status });
 
   const commCanoeTenantId = guard.tenant.id;

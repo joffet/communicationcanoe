@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireSuperAdminAction } from "@/lib/auth/access";
+import { type TenantId } from "@communication-canoe/database";
 
 export async function createTenantAction(input: {
   name: string;
@@ -40,7 +41,7 @@ export async function createTenantAction(input: {
 }
 
 export async function updateTenantAction(
-  id: string,
+  id: TenantId,
   input: {
     name: string;
     twilioNumber: string;

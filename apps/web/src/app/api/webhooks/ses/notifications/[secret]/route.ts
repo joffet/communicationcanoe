@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { createAdminService, createDomainService } from "@communication-canoe/database";
+import { type TenantId, createAdminService, createDomainService } from "@communication-canoe/database";
 import { notifyResideIdentityStatus } from "@/lib/reside/identity-status-client";
 
 type SesEvent = {
@@ -94,7 +94,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ sec
 
 async function recordOutcomeAndMaybeNotifyReside(
   domain: ReturnType<typeof createDomainService>,
-  message: { id: string; tenantId: string; conversationId: string },
+  message: { id: string; tenantId: TenantId; conversationId: string },
   outcome: "success" | "hard_failure",
 ): Promise<void> {
   const thread = await domain.getConversationThread(message.conversationId);

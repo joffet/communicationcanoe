@@ -14,6 +14,7 @@ import {
   tenants,
   users,
 } from "../schema";
+import { asResideClientUid } from "@communication-canoe/shared/brands";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -46,7 +47,7 @@ beforeEach(async () => {
 async function seed() {
   const [tenant] = await db.insert(tenants).values({
     name: "Tenant", twilioNumber: "+15550000001",
-    inboundEmailAddress: "t@example.test", chatWidgetKey: "key", resideClientUid: "client",
+    inboundEmailAddress: "t@example.test", chatWidgetKey: "key", resideClientUid: asResideClientUid("client"),
   }).returning();
   await db.insert(users).values([
     { id: ADMIN_1, email: "a1@example.test", name: "Admin One" },

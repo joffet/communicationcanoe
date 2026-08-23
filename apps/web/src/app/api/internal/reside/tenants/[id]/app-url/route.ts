@@ -7,7 +7,7 @@
 // validation before reaching the idempotent early-return. A settings save in
 // reside knows the routing domain and nothing else.
 
-import { createAdminService } from "@communication-canoe/database";
+import { asResideClientUid, createAdminService } from "@communication-canoe/database";
 import { z } from "zod";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
 
@@ -31,12 +31,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const admin = createAdminService();
-  const tenant = await admin.getTenantByResideClientUid(resideClientUid);
+  const tenant = await admin.getTenantByResideClientUid(asResideClientUid(resideClientUid));
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }
 
-  await admin.updateTenantResideAppUrl(resideClientUid, parsed.data.resideAppUrl);
+  await admin.updateTenantResideAppUrl(asResideClientUid(resideClientUid), parsed.data.resideAppUrl);
 
   return Response.json({ ok: true, resideAppUrl: parsed.data.resideAppUrl });
 }

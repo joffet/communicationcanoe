@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createAdminService } from "@communication-canoe/database";
+import { createAdminService, isTenantId } from "@communication-canoe/database";
 import {
   adminPageContainerClassName,
   adminPageTitleClassName,
@@ -15,6 +15,11 @@ type EditTenantPageProps = {
 export default async function EditTenantPage({ params }: EditTenantPageProps) {
   await requireSuperAdmin();
   const { id } = await params;
+  // This is comm-canoe's own admin URL, so `id` is a tenant uuid - but it is
+  // still a path segment anyone can type. A malformed one is a 404 here rather
+  // than a uuid cast error out of Postgres.
+  if (!isTenantId(id)) notFound();
+
   const admin = createAdminService();
   const tenant = await admin.getTenantById(id);
   if (!tenant) notFound();

@@ -10,9 +10,10 @@ import {
   MESSAGE_VISIBILITIES,
   SENDER_TYPES,
 } from "../constants";
+import { asResideClientUid, asTenantId } from "../brands";
 
 export const appendMessageInputSchema = z.object({
-  tenantId: z.string().uuid(),
+  tenantId: z.string().uuid().transform(asTenantId),
   /** Set by reside-originated sends so its durable retry queue can re-send
    * after a lost response without delivering the message twice. */
   idempotencyKey: z.string().min(1).optional(),
@@ -71,7 +72,7 @@ export const convertIdentityInputSchema = z.object({
 });
 
 export const logLiveTransferInputSchema = z.object({
-  tenantId: z.string().uuid(),
+  tenantId: z.string().uuid().transform(asTenantId),
   conversationId: z.string().uuid(),
   channel: z.enum(["voice", "web_chat"]),
   attemptedUserId: z.string().uuid().optional(),
@@ -93,9 +94,16 @@ export const conversationFiltersSchema = z.object({
  * against the text `tenants.reside_client_uid` column and use the resulting
  * `tenant.id` for everything downstream. The two schemas above
  * (appendMessageInputSchema, logLiveTransferInputSchema) are internal and are
- * always called with comm-canoe's own uuid, so they stay strict. */
+ * always called with comm-canoe's own uuid, so they stay strict.
+ *
+ * That distinction is no longer prose alone: each field parses to a branded
+ * type (see ../brands), so a value from a `.min(1)` field below is a
+ * `ResideClientUid` and will not typecheck where a `TenantId` is wanted. The
+ * only way across is `getTenantByResideClientUid`. Both halves of this rule
+ * had already been broken once each — the outbound batch status endpoint and
+ * the reside SSO token exchange — which is what the brands exist to stop. */
 export const provisionTenantInputSchema = z.object({
-  resideClientUid: z.string().min(1),
+  resideClientUid: z.string().min(1).transform(asResideClientUid),
   name: z.string().min(1),
   twilioNumber: z.string().min(1),
   inboundEmailAddress: z.string().email(),
@@ -107,7 +115,7 @@ export const provisionTenantInputSchema = z.object({
 
 export const resideSendMessageInputSchema = z
   .object({
-    tenantId: z.string().min(1),
+    tenantId: z.string().min(1).transform(asResideClientUid),
     channel: z.enum(["sms", "email"]),
     identity: identityContactBaseSchema,
     body: z.string().min(1),
@@ -130,7 +138,7 @@ export const resideSendMessageInputSchema = z
 
 export const resideSendBulkMessageInputSchema = z
   .object({
-    tenantId: z.string().min(1),
+    tenantId: z.string().min(1).transform(asResideClientUid),
     channel: z.enum(["sms", "email"]),
     body: z.string().min(1),
     subject: z.string().optional(),
@@ -158,32 +166,32 @@ export const resideActorSchema = z.object({
 });
 
 export const resideAddTagInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   tagName: z.string().min(1),
 });
 
 export const resideRemoveTagInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
 });
 
 export const resideAssigneeInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   actor: resideActorSchema,
   assignee: resideActorSchema,
 });
 
 export const resideRemoveAssigneeInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
 });
 
 export const resideParticipantInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   actor: resideActorSchema,
   participant: resideActorSchema,
 });
 
 export const resideConversationReplyInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   actor: resideActorSchema,
   channel: z.enum(["sms", "email"]),
   body: z.string().min(1),
@@ -191,32 +199,32 @@ export const resideConversationReplyInputSchema = z.object({
 });
 
 export const resideCancelScheduledMessageInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
 });
 
 export const resideApproveFlaggedMessageInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
 });
 
 export const resideUpdateConversationStatusInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   status: z.enum(CONVERSATION_STATUSES),
 });
 
 // ---- Per-user read tracking + personal tags (Reside dashboard unread/relevance) ----
 export const resideMarkReadInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   actor: resideActorSchema,
 });
 
 export const residePersonalTagInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   actor: resideActorSchema,
   target: resideActorSchema,
 });
 
 export const resideRemovePersonalTagInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
 });
 
 // ---- Phase 4: resident-facing conversation endpoints ----
@@ -225,17 +233,17 @@ export const resideRemovePersonalTagInputSchema = z.object({
 // sends), not a resolved platform user - a fundamentally different anchor
 // than Phase 3's resideActorSchema.
 export const resideMemberListInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   contact: identityContactSchema,
 });
 
 export const resideMemberThreadInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   contact: identityContactSchema,
 });
 
 export const resideMemberReplyInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   contact: identityContactSchema,
   channel: z.enum(["sms", "email"]),
   body: z.string().min(1),
@@ -246,7 +254,7 @@ export const resideMemberReplyInputSchema = z.object({
 // surface (greeting_message/business_hours/bounce_threshold etc. aren't
 // reside-configurable yet and don't need to be for this phase).
 export const resideUpdateTenantSettingsInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   defaultResponseWindowMinutes: z.number().int().positive().max(1440).optional(),
   externalSendDelaySeconds: z.number().int().min(0).max(3600).optional(),
   conversationStalenessMinutes: z.number().int().positive().max(10080).optional(),
@@ -259,14 +267,14 @@ export const resideUpdateTenantSettingsInputSchema = z.object({
 
 // ---- Phase 7: conversation merging ----
 export const resideMergeConversationsInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   actor: resideActorSchema,
   targetConversationId: z.string().uuid(),
 });
 
 // ---- Phase 8: conversation splitting (manual/admin-triggered only) ----
 export const resideSplitConversationInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   actor: resideActorSchema,
   messageId: z.string().uuid(),
 });
@@ -279,7 +287,7 @@ export const resideSplitConversationInputSchema = z.object({
 // through even though the real cap enforcement is the tenant document/chunk
 // count check in the endpoint itself).
 export const resideCreateKnowledgeDocumentInputSchema = z.object({
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).transform(asResideClientUid),
   filename: z.string().min(1).max(500),
   contentText: z.string().min(1).max(2_000_000),
   extractor: z.string().min(1).max(100),

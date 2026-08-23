@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createUserAction, updateUserAction } from "./actions";
+import { asTenantId } from "@communication-canoe/database";
 
 type UserFormProps = {
   user?: AdminUser | null;
@@ -218,7 +219,7 @@ export function UserForm({ user, tenants }: UserFormProps) {
                 <Select
                   value={row.tenantId}
                   onValueChange={(tenantId) =>
-                    updateMembership(index, { tenantId })
+                    updateMembership(index, { tenantId: asTenantId(tenantId) })
                   }
                   disabled={busy}
                 >

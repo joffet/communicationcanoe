@@ -1,5 +1,6 @@
 import { createDomainService } from "@communication-canoe/database";
 import { routeConversation } from "@communication-canoe/shared/ai";
+import type { TenantId } from "@communication-canoe/database";
 
 /**
  * Both ids are required to agree, so this checks that they do.
@@ -18,7 +19,7 @@ import { routeConversation } from "@communication-canoe/shared/ai";
  * boundary silently, and that is precisely the shape of the two route bugs
  * fixed in #11 and 0d4cc2e.
  */
-export async function triggerConversationRouting(conversationId: string, tenantId: string) {
+export async function triggerConversationRouting(conversationId: string, tenantId: TenantId) {
   const domain = createDomainService();
   const thread = await domain.getConversationThread(conversationId);
   if (!thread || thread.tenantId !== tenantId || thread.assignedTeamId) return;

@@ -4,6 +4,7 @@ import { DomainService } from "./index";
 import type { AppSupabaseClient } from "../client";
 import { createTestDb, resetTestDb, type TestDb } from "../testing/pglite";
 import { conversationReadStates, conversations, identities, messages, tenants, users } from "../schema";
+import { asResideClientUid, type TenantId } from "@communication-canoe/shared/brands";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -33,7 +34,7 @@ beforeEach(async () => {
 async function seed() {
   const [tenant] = await db.insert(tenants).values({
     name: "Tenant", twilioNumber: "+15550000001",
-    inboundEmailAddress: "t@example.test", chatWidgetKey: "key", resideClientUid: "client",
+    inboundEmailAddress: "t@example.test", chatWidgetKey: "key", resideClientUid: asResideClientUid("client"),
   }).returning();
 
   await db.insert(users).values({ id: VIEWER, email: "viewer@example.test", name: "Viewer" });
@@ -45,7 +46,7 @@ async function seed() {
   return { tenant, identity };
 }
 
-async function makeConversation(tenantId: string, identityId: string) {
+async function makeConversation(tenantId: TenantId, identityId: string) {
   const [conversation] = await db.insert(conversations).values({
     tenantId, identityId, status: "open",
   }).returning();
@@ -53,7 +54,7 @@ async function makeConversation(tenantId: string, identityId: string) {
 }
 
 async function addMessage(
-  tenantId: string, conversationId: string, createdAt: Date, body: string,
+  tenantId: TenantId, conversationId: string, createdAt: Date, body: string,
 ) {
   const [message] = await db.insert(messages).values({
     tenantId, conversationId, channel: "email", direction: "inbound",
