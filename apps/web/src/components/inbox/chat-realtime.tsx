@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { createRealtimeClient } from "@/lib/supabase/realtime";
 
+/** Conversation id -> the AI's reason for escalating, or null until the fetch
+ * below lands (or if the transfer carries no reason). */
 export function useNeedsHumanConversations(tenantId: string) {
-  const [needsHuman, setNeedsHuman] = useState<Set<string>>(new Set());
+  const [needsHuman, setNeedsHuman] = useState<Map<string, string | null>>(new Map());
 
   useEffect(() => {
     const supabase = createRealtimeClient();
@@ -12,7 +14,23 @@ export function useNeedsHumanConversations(tenantId: string) {
       .channel(`chat:tenant:${tenantId}`)
       .on("broadcast", { event: "needs_human" }, (payload) => {
         const data = payload.payload as ChatBroadcastNeedsHuman;
-        setNeedsHuman((prev) => new Set(prev).add(data.conversationId));
+        setNeedsHuman((prev) => new Map(prev).set(data.conversationId, null));
+
+        // The reason is not in the payload on purpose - this channel is
+        // public - so it comes from the tenant-scoped route instead.
+        void (async () => {
+          const res = await fetch(
+            `/api/conversations/${data.conversationId}/transfer-reason`,
+          );
+          if (!res.ok) return;
+          const body = (await res.json()) as { reason: string | null };
+          if (!body.reason) return;
+          setNeedsHuman((prev) =>
+            prev.has(data.conversationId)
+              ? new Map(prev).set(data.conversationId, body.reason)
+              : prev,
+          );
+        })();
       })
       .subscribe();
 
@@ -23,7 +41,7 @@ export function useNeedsHumanConversations(tenantId: string) {
 
   function clearNeedsHuman(conversationId: string) {
     setNeedsHuman((prev) => {
-      const next = new Set(prev);
+      const next = new Map(prev);
       next.delete(conversationId);
       return next;
     });

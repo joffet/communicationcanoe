@@ -214,10 +214,32 @@ export class DomainService {
         attemptedUserId: input.attemptedUserId ?? null,
         messageId: input.messageId ?? null,
         outcome: input.outcome,
+        reason: input.reason ?? null,
       })
       .returning();
 
     return transfer;
+  }
+
+  /** The escalation still waiting on a human, if there is one — the row
+   * beginHandoff writes as `pending` and agentJoin flips to `answered`.
+   * Takes the tenant rather than trusting the caller with a bare id, since
+   * the reason text it carries is the visitor's own words. */
+  async getPendingLiveTransfer(
+    conversationId: string,
+    tenantId: TenantId,
+  ): Promise<LiveTransfer | null> {
+    const [transfer] = await this.orm
+      .select()
+      .from(liveTransfers)
+      .where(and(
+        eq(liveTransfers.conversationId, conversationId),
+        eq(liveTransfers.tenantId, tenantId),
+        eq(liveTransfers.outcome, "pending"),
+      ))
+      .orderBy(desc(liveTransfers.createdAt)).limit(1);
+
+    return transfer ?? null;
   }
 
   async updateLiveTransferOutcome(

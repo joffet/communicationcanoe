@@ -70,7 +70,7 @@ export class ChatSession {
         this.pendingAiText = "";
         if (!body.trim() || this.handoffState !== "ai") return;
 
-        const message = await this.domain.appendMessage({
+        await this.domain.appendMessage({
           tenantId: this.tenantId,
           conversationId: this.conversationId,
           channel: "web_chat",
@@ -82,14 +82,7 @@ export class ChatSession {
         });
 
         this.send({ type: "message", text: body, senderType: "ai_agent" });
-        await broadcastChatMessage(this.conversationId, {
-          id: message.id,
-          body: message.body,
-          direction: message.direction,
-          senderType: message.senderType,
-          channel: "web_chat",
-          createdAt: message.createdAt.toISOString(),
-        });
+        await broadcastChatMessage(this.conversationId);
       },
       onToolCall: (name, args, callId) => {
         void this.handleToolCall(name, args, callId);
@@ -146,7 +139,7 @@ export class ChatSession {
 
   async handleVisitorMessage(text: string) {
     if (this.handoffState === "human") {
-      const message = await this.domain.appendMessage({
+      await this.domain.appendMessage({
         tenantId: this.tenantId,
         conversationId: this.conversationId,
         channel: "web_chat",
@@ -157,14 +150,7 @@ export class ChatSession {
         // Came directly from the visitor.
         visibility: "external",
       });
-      await broadcastChatMessage(this.conversationId, {
-        id: message.id,
-        body: message.body,
-        direction: message.direction,
-        senderType: message.senderType,
-        channel: "web_chat",
-        createdAt: message.createdAt.toISOString(),
-      });
+      await broadcastChatMessage(this.conversationId);
       return;
     }
 
@@ -202,21 +188,20 @@ export class ChatSession {
       conversationId: this.conversationId,
       channel: "web_chat",
       outcome: "pending",
+      reason,
     });
     this.activeTransferId = transfer.id;
 
-    await broadcastNeedsHuman(this.tenantId, {
-      conversationId: this.conversationId,
-      reason,
-      transferId: transfer.id,
-    });
+    // No `reason` here - see the payload note in protocol.ts. The dashboard
+    // reads it from the tenant-scoped conversation route instead.
+    await broadcastNeedsHuman(this.tenantId, { conversationId: this.conversationId });
 
     this.send({
       type: "handoff",
       state: "waiting",
       message: "Connecting you to a team member…",
     });
-    await broadcastHandoffState(this.conversationId, { state: "waiting" });
+    await broadcastHandoffState(this.conversationId);
 
     this.handoffTimer = setTimeout(() => {
       void this.handleHandoffTimeout();
@@ -248,10 +233,7 @@ export class ChatSession {
       state: "human",
       message: `${agentName ?? "A team member"} has joined the chat.`,
     });
-    await broadcastHandoffState(this.conversationId, {
-      state: "human",
-      agentUserId,
-    });
+    await broadcastHandoffState(this.conversationId);
   }
 
   relayAgentMessage(body: string) {
@@ -263,7 +245,7 @@ export class ChatSession {
   }
 
   async agentMessage(body: string, agentUserId: string, agentName?: string) {
-    const message = await this.domain.appendMessage({
+    await this.domain.appendMessage({
       tenantId: this.tenantId,
       conversationId: this.conversationId,
       channel: "web_chat",
@@ -281,14 +263,7 @@ export class ChatSession {
       senderType: "internal_user",
     });
 
-    await broadcastChatMessage(this.conversationId, {
-      id: message.id,
-      body: message.body,
-      direction: message.direction,
-      senderType: message.senderType,
-      channel: "web_chat",
-      createdAt: message.createdAt.toISOString(),
-    });
+    await broadcastChatMessage(this.conversationId);
     void agentName;
   }
 
@@ -305,7 +280,7 @@ export class ChatSession {
       state: "ai",
       message: "No one is available right now. I can help you leave a message.",
     });
-    await broadcastHandoffState(this.conversationId, { state: "ai" });
+    await broadcastHandoffState(this.conversationId);
 
     await this.start();
     this.realtime?.sendUserText(

@@ -58,6 +58,7 @@ export function InboxShell({
   const isWebChat = thread?.messages.some((m) => m.channel === "web_chat");
   const isAssignedToMe = thread?.assignedUserId === currentUserId;
   const needsHumanNow = selectedId ? needsHuman.has(selectedId) : false;
+  const needsHumanReason = selectedId ? needsHuman.get(selectedId) : null;
 
   async function loadSuggestion() {
     if (!selectedId) return;
@@ -145,7 +146,10 @@ export function InboxShell({
                       <span className="truncate font-medium">{label}</span>
                       <div className="flex shrink-0 items-center gap-2">
                         {live && (
-                          <span className="h-2 w-2 rounded-full bg-red-500" title="Needs human" />
+                          <span
+                            className="h-2 w-2 rounded-full bg-red-500"
+                            title={needsHuman.get(c.id) ?? "Needs human"}
+                          />
                         )}
                         <span className="text-xs text-zinc-400">
                           {formatRelativeTime(c.lastMessageAt.toISOString())}
@@ -207,7 +211,8 @@ export function InboxShell({
 
             {needsHumanNow && (
               <div className="border-b border-red-200 bg-red-50 px-6 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
-                Live chat — human needed
+                <span className="font-medium">Live chat — human needed</span>
+                {needsHumanReason && <span> — {needsHumanReason}</span>}
               </div>
             )}
 

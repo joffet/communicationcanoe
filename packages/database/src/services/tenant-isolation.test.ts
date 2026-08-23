@@ -212,6 +212,31 @@ describe("fetching one row by id, scoped by tenant", () => {
     expect(other).toBeNull();
   });
 
+  it("getPendingLiveTransfer refuses another tenant's transfer", async () => {
+    // The row carries the visitor's own words for why they asked for a human,
+    // which is the whole reason this read takes a tenant.
+    await domain.logLiveTransfer({
+      tenantId: a.tenant.id,
+      conversationId: a.conversation.id,
+      channel: "web_chat",
+      outcome: "pending",
+      reason: "Wants a refund",
+    });
+    await domain.logLiveTransfer({
+      tenantId: b.tenant.id,
+      conversationId: b.conversation.id,
+      channel: "web_chat",
+      outcome: "pending",
+      reason: "Tenant B's business",
+    });
+
+    const own = await domain.getPendingLiveTransfer(a.conversation.id, a.tenant.id);
+    expect(own?.reason).toBe("Wants a refund");
+
+    const other = await domain.getPendingLiveTransfer(b.conversation.id, a.tenant.id);
+    expect(other).toBeNull();
+  });
+
   it("getDocument refuses another tenant's document", async () => {
     expect(await domain.getDocument(a.tenant.id, a.document.id)).not.toBeNull();
     expect(await domain.getDocument(a.tenant.id, b.document.id)).toBeNull();

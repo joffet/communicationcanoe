@@ -1,6 +1,7 @@
 import type WebSocket from "ws";
 import Twilio from "twilio";
 import { type TenantId, createDomainService, isTenantId } from "@communication-canoe/database";
+import type { TransferToHumanArgs } from "@communication-canoe/shared/realtime";
 import type { BridgeConfig } from "../config.js";
 import { OpenAIRealtimeClient } from "../openai/realtime-client.js";
 import { sessionManager } from "./session-manager.js";
@@ -87,6 +88,8 @@ export class VoiceSession {
   ) {
     if (!this.realtime || name !== "transfer_to_human") return;
 
+    const input = args as TransferToHumanArgs;
+
     const tenantId = this.tenantId;
     // Both of these come from the Twilio <Stream> customParameters and are the
     // only trustworthy source for them. There is deliberately no fallback to a
@@ -110,6 +113,7 @@ export class VoiceSession {
         conversationId,
         channel: "voice",
         outcome: "no_answer",
+        reason: input.reason,
       });
       this.realtime.submitToolOutput(
         callId,
@@ -124,6 +128,7 @@ export class VoiceSession {
       channel: "voice",
       attemptedUserId: target.id,
       outcome: "answered",
+      reason: input.reason,
     });
 
     if (
