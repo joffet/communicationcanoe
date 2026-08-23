@@ -343,10 +343,10 @@ Checked and found consistent, recorded so nobody re-derives them:
 
 ## 3. RLS policy inventory
 
-**None of this is in force.** It is written down because
-`packages/database/src/services/tenant-isolation.test.ts` is what replaced it,
-and a test suite is only a faithful replacement if you can see what it is
-replacing.
+**None of this is in force.** It is written down because two test files in
+`packages/database/src/services/` are what replaced it —
+`tenant-isolation.test.ts` and `tenant-scoping-census.test.ts` — and a test
+suite is only a faithful replacement if you can see what it is replacing.
 
 ### 3.1 Why the policies were not ported
 
@@ -477,11 +477,24 @@ other levels:
   `CONNECT` revoked from `PUBLIC` and granted only to each product's own role.
   Stronger than the RLS it replaces, and non-bypassable — but it protects the
   product boundary, not the tenant boundary.
-- **Between tenants:** `src/services/tenant-isolation.test.ts`. Builds two
-  complete parallel tenants and asserts that tenant A's service call cannot
-  reach tenant B's row. New service methods need a case there; a method that
-  forgets its predicate passes every other test in this package, because every
-  other test seeds a single tenant.
+- **Between tenants:** two files, because a service method can be scoped in
+  two different ways and only one of them is testable by querying.
+
+  `src/services/tenant-isolation.test.ts` covers methods that take a
+  `tenantId`. It builds two complete parallel tenants and asserts that tenant
+  A's service call cannot reach tenant B's row. New tenant-scoped methods need
+  a case there; a method that forgets its predicate passes every other test in
+  this package, because every other test seeds a single tenant.
+
+  `src/services/tenant-scoping-census.test.ts` covers the 47 methods that take
+  an entity id and no tenant — the direct consequence of §3.4's last paragraph.
+  Those methods cannot filter, because five of the tables they touch have no
+  `tenant_id` column to filter on, so the **caller** is the boundary instead.
+  The test parses `index.ts` and holds an exact register of them, failing in
+  both directions: an unregistered caller-enforced method fails it, and a
+  registered method that later gains a `tenantId` fails it too, so the list
+  cannot quietly outlive its reason. Every cross-tenant bug this app has
+  shipped came from this category.
 
 ---
 

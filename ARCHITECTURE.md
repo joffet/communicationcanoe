@@ -60,8 +60,9 @@ was decided and why at the time. What changed since:
 - **RLS-as-backstop was dropped, not deferred.** The policies keyed off
   `auth.uid()`, which this app stopped supplying when it adopted Better Auth,
   and the connection role carries `BYPASSRLS` regardless. They were never
-  ported. `packages/database/src/services/tenant-isolation.test.ts` is what the
-  cutover traded them for.
+  ported. Two test files are what the cutover traded them for:
+  `tenant-isolation.test.ts` and `tenant-scoping-census.test.ts`, both in
+  `packages/database/src/services/`. See section 4.
 
 ---
 
@@ -150,7 +151,11 @@ Once tenant is resolved, all downstream work — identity matching, conversation
 
 - Identity matching (phone/email auto-merge) never crosses tenant boundaries.
 - Every core table carries `tenant_id`.
-- **Enforcement is application-layer, with nothing underneath it.** There is no RLS backstop, and there is not going to be one — see the superseded-decisions note in section 2. Every API route and every service method must explicitly filter by `tenant_id` derived from the verified Better Auth session; never rely on implicit context. Each `WHERE tenant_id = $1` *is* the security boundary, not a first line of defense in front of one. Treat a missing predicate as a security bug, not a correctness bug: the failure mode is returning another tenant's rows, and it has shipped more than once. New service methods need a matching case in `packages/database/src/services/tenant-isolation.test.ts`, which builds two parallel tenants and asserts that tenant A's call cannot see tenant B's row — a method that forgets its predicate passes every other test in the package, because every other test seeds one tenant.
+- **Enforcement is application-layer, with nothing underneath it.** There is no RLS backstop, and there is not going to be one — see the superseded-decisions note in section 2. Every API route and every service method must explicitly filter by `tenant_id` derived from the verified Better Auth session; never rely on implicit context. Each `WHERE tenant_id = $1` *is* the security boundary, not a first line of defense in front of one. Treat a missing predicate as a security bug, not a correctness bug: the failure mode is returning another tenant's rows, and it has shipped more than once. Two test files hold that line, and they answer different questions.
+
+  `tenant-isolation.test.ts` covers methods that take a `tenantId`: it builds two complete parallel tenants and asserts that tenant A's call cannot see tenant B's row. A method that forgets its predicate passes every other test in the package, because every other test seeds one tenant. New tenant-scoped methods need a matching case here.
+
+  `tenant-scoping-census.test.ts` covers the 47 methods that take an entity id and **no** tenant. Those are not bugs: five of the tables they touch (`conversation_tags`, `conversation_assignees`, `conversation_participants`, `conversation_read_states`, `conversation_personal_tags`) carry no `tenant_id` column at all — they hang off a conversation, and the conversation is what has an owner. A method given only an id cannot know whose id it is, which makes the **caller** the boundary for every one of them. The file is a liability register rather than a to-do list: it is exact in both directions, so an unregistered caller-enforced method fails it, and a registered method that later gains a `tenantId` fails it too. Every cross-tenant bug this app has shipped came from this category — the resident who could read every conversation, the batch status endpoint, and two route fixes since the cutover, both of the form "resolve the tenant before using the id".
 - **Cross-product isolation is at the database level.** comm-canoe and reside are separate logical databases on one PlanetScale cluster, and neither role holds `CONNECT` on the other's. That is deliberately stronger than a shared database with per-table grants, and it is what keeps a bug in the application layer above from reaching the other product. The cost is that a cross-product join is impossible rather than merely ungranted; the two are coupled only through reside's client uid.
 - Internal users access tenants via a membership table, not a single foreign key, since some staff need multi-tenant access (e.g. an agency managing several brands).
 
