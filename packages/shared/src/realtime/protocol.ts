@@ -20,32 +20,33 @@ export type ChatWidgetServerMessage =
   | { type: "history"; messages: Array<{ body: string; direction: string; senderType: string }> }
   | { type: "error"; code: string; message?: string };
 
-/** Carries no escalation reason on purpose — chat:tenant:* is public, so
- * anything here is readable by any holder of the anon key. The reason lives on
- * live_transfers and is read through the tenant-scoped conversation route. */
+/**
+ * Dashboard broadcast payloads.
+ *
+ * These go out on Supabase Realtime channels that any holder of the public
+ * anon key can subscribe to - they are not private channels, and the
+ * authorization data that would gate them (conversations, memberships) lives
+ * in PlanetScale where a Supabase RLS policy cannot reach it. So the rule
+ * here is that a payload carries an identifier or nothing, never content:
+ * whatever a subscriber learns must be no more than "something happened".
+ *
+ * That costs nothing, because the dashboard never read the content anyway.
+ * Every listener in chat-realtime.tsx calls router.refresh() and drops the
+ * payload on the floor; the conversation is then refetched through the
+ * authenticated, tenant-scoped server route, which is the only path that was
+ * ever load-bearing. The visitor's own copy of a message does not come from
+ * here either - chat-session.ts sends it down their WebSocket directly.
+ */
 export type ChatBroadcastNeedsHuman = {
+  /** The only field any subscriber reads (useNeedsHumanConversations). */
   conversationId: string;
-  transferId: string;
 };
 
-export type ChatBroadcastHandoffState = {
-  state: "waiting" | "human" | "ai";
-  agentUserId?: string;
-};
+/** Signal only - see the note above. `handoff_state` names what changed. */
+export type ChatBroadcastHandoffState = Record<string, never>;
 
-export type ChatBroadcastMessage = {
-  id: string;
-  body: string;
-  direction: "inbound" | "outbound";
-  senderType: "external" | "internal_user" | "ai_agent" | "system";
-  channel: "web_chat";
-  createdAt: string;
-};
-
-export type ChatBroadcastTyping = {
-  senderType: "external" | "internal_user";
-  name?: string;
-};
+/** Signal only - see the note above. `message` names what changed. */
+export type ChatBroadcastMessage = Record<string, never>;
 
 export type HandoffJoinRequest = {
   conversationId: string;
