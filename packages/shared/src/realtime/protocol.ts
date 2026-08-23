@@ -20,9 +20,11 @@ export type ChatWidgetServerMessage =
   | { type: "history"; messages: Array<{ body: string; direction: string; senderType: string }> }
   | { type: "error"; code: string; message?: string };
 
+/** Carries no escalation reason on purpose — chat:tenant:* is public, so
+ * anything here is readable by any holder of the anon key. The reason lives on
+ * live_transfers and is read through the tenant-scoped conversation route. */
 export type ChatBroadcastNeedsHuman = {
   conversationId: string;
-  reason: string;
   transferId: string;
 };
 
