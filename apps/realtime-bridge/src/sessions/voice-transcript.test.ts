@@ -1,9 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BridgeConfig } from "../config.js";
+import type { TenantId } from "@communication-canoe/database";
+
+/** A real uuid: VoiceSession shape-checks the tenant id Twilio replays, so a
+ * bare "tenant-1" placeholder would be rejected at that boundary and these
+ * tests would exercise the tenantless path instead of the one they name. */
+const TENANT_ID = "11111111-1111-4111-8111-111111111111" as TenantId;
 
 const appendMessage = vi.fn();
 
-vi.mock("@communication-canoe/database", () => ({
+// Spreads the real brand helpers in rather than restating them, so the shape
+// check VoiceSession applies here is the one production applies.
+vi.mock("@communication-canoe/database", async () => ({
+  ...(await import("@communication-canoe/shared/brands")),
   createDomainService: () => ({
     appendMessage,
     logLiveTransfer: vi.fn(),
@@ -42,7 +51,7 @@ async function startedSession() {
     start: {
       streamSid: "MZ1",
       callSid: "CA1",
-      customParameters: { tenantId: "tenant-1", conversationId: "conv-1" },
+      customParameters: { tenantId: TENANT_ID, conversationId: "conv-1" },
     },
   });
   return session;
