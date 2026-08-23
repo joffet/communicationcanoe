@@ -65,7 +65,6 @@ declare global {
   type ChatBroadcastHandoffState =
     import("@communication-canoe/shared/realtime").ChatBroadcastHandoffState;
   type ChatBroadcastMessage = import("@communication-canoe/shared/realtime").ChatBroadcastMessage;
-  type ChatBroadcastTyping = import("@communication-canoe/shared/realtime").ChatBroadcastTyping;
   type HandoffJoinRequest = import("@communication-canoe/shared/realtime").HandoffJoinRequest;
   type AgentMessageRequest = import("@communication-canoe/shared/realtime").AgentMessageRequest;
 
