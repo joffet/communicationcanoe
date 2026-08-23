@@ -914,13 +914,23 @@ export class DomainService {
     };
   }
 
-  /** Idempotent first-open recorder for the tracking pixel - only sets
-   * opened_at if unset, so the timestamp reflects the first open. */
-  async markMessageOpened(messageId: string): Promise<void> {
-    await this.orm
+  /**
+   * Idempotent first-open recorder for the tracking pixel - only sets
+   * opened_at if unset, so the timestamp reflects the first open.
+   *
+   * Reports whether this call was the one that recorded it. Callers that
+   * notify anyone downstream need that: an image proxy re-fetches a cached
+   * pixel every time the message is displayed, so "an open happened" fires
+   * repeatedly while "the first open happened" fires once.
+   */
+  async markMessageOpened(messageId: string): Promise<{ firstOpen: boolean }> {
+    const updated = await this.orm
       .update(messages)
       .set({ openedAt: new Date() })
-      .where(and(eq(messages.id, messageId), isNull(messages.openedAt)));
+      .where(and(eq(messages.id, messageId), isNull(messages.openedAt)))
+      .returning({ id: messages.id });
+
+    return { firstOpen: updated.length > 0 };
   }
 
   /**
