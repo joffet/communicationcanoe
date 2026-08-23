@@ -1,7 +1,6 @@
 import type WebSocket from "ws";
 import Twilio from "twilio";
 import { createDomainService } from "@communication-canoe/database";
-import type { TransferToHumanArgs } from "@communication-canoe/shared/realtime";
 import type { BridgeConfig } from "../config.js";
 import { OpenAIRealtimeClient } from "../openai/realtime-client.js";
 import { sessionManager } from "./session-manager.js";
@@ -83,9 +82,14 @@ export class VoiceSession {
   ) {
     if (!this.realtime || name !== "transfer_to_human") return;
 
-    const input = args as TransferToHumanArgs;
     const tenantId = this.tenantId;
-    const conversationId = this.conversationId ?? input.conversation_id;
+    // Both of these come from the Twilio <Stream> customParameters and are the
+    // only trustworthy source for them. There is deliberately no fallback to a
+    // model-supplied id: logLiveTransfer does not check that a conversation
+    // belongs to the tenant, so a value the caller could talk the model into
+    // saying would log the transfer against someone else's conversation.
+    // Refusing the transfer is the safe failure.
+    const conversationId = this.conversationId;
 
     if (!tenantId || !conversationId) {
       this.realtime.submitToolOutput(callId, JSON.stringify({ success: false }));
