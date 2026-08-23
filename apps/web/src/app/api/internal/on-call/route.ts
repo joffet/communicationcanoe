@@ -1,4 +1,5 @@
 import { verifyInternalSecret, getOnCallUsers } from "@/lib/bridge/internal";
+import { asTenantId } from "@communication-canoe/database";
 
 export async function GET(request: Request) {
   if (!verifyInternalSecret(request)) {
@@ -13,6 +14,6 @@ export async function GET(request: Request) {
     return new Response("Missing tenantId", { status: 400 });
   }
 
-  const users = await getOnCallUsers(tenantId, teamId);
+  const users = await getOnCallUsers(asTenantId(tenantId), teamId);
   return Response.json({ users });
 }

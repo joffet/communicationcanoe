@@ -63,6 +63,7 @@ import type {
   Tenant,
   TenantSettings,
 } from "../types";
+import type { TenantId } from "@communication-canoe/shared/brands";
 
 /** Strips repeated Re:/Fwd:/FW: prefixes and normalizes whitespace/case, so
  * "Re: Fwd: Parking permit" and "parking permit" compare equal. No existing
@@ -140,7 +141,7 @@ export class DomainService {
   }
 
   async findOrCreateAnonymousIdentity(
-    tenantId: string,
+    tenantId: TenantId,
     input: AnonymousIdentityInput,
   ): Promise<Identity> {
     const email = input.email ? normalizeEmail(input.email) : undefined;
@@ -160,7 +161,7 @@ export class DomainService {
 
   async convertIdentity(
     identityId: string,
-    tenantId: string,
+    tenantId: TenantId,
     input: ConvertIdentityInput,
     convertedBy: "system" | "user" = "system",
     convertedByUserId?: string,
@@ -243,7 +244,7 @@ export class DomainService {
   }
 
   createChatSessionToken(
-    tenantId: string,
+    tenantId: TenantId,
     conversationId: string,
     identityId: string,
   ): string {
@@ -251,7 +252,7 @@ export class DomainService {
   }
 
   async resumeConversationBySessionToken(
-    tenantId: string,
+    tenantId: TenantId,
     sessionToken: string,
   ): Promise<{ conversation: Conversation; identity: Identity } | null> {
     const payload = verifyChatSessionToken(sessionToken);
@@ -284,7 +285,7 @@ export class DomainService {
     return { conversation: thread, identity: thread.identity };
   }
 
-  async getOnCallUsers(tenantId: string, teamId?: string | null) {
+  async getOnCallUsers(tenantId: TenantId, teamId?: string | null) {
     let teamIds: string[] = [];
     if (teamId) {
       teamIds = [teamId];
@@ -310,7 +311,7 @@ export class DomainService {
   }
 
   async findOrCreateIdentity(
-    tenantId: string,
+    tenantId: TenantId,
     contact: IdentityContact,
   ): Promise<Identity> {
     const phone = contact.phone ? normalizePhone(contact.phone) : undefined;
@@ -379,7 +380,7 @@ export class DomainService {
    * unsafe to trigger from a polled read path (list/thread conversations).
    */
   async findIdentityForContact(
-    tenantId: string,
+    tenantId: TenantId,
     contact: { phone?: string; email?: string },
   ): Promise<Identity | null> {
     const phone = contact.phone ? normalizePhone(contact.phone) : undefined;
@@ -410,7 +411,7 @@ export class DomainService {
    * conversation was stale, so inbound-webhook callers can flag the
    * message for the async AI topic-shift check (conversation-routing-worker). */
   async findOrCreateConversation(
-    tenantId: string,
+    tenantId: TenantId,
     identityId: string,
     context?: { channel?: string; subject?: string },
   ): Promise<{ conversation: Conversation; isStale: boolean }> {
@@ -537,7 +538,7 @@ export class DomainService {
 
   /** Looks up a prior send by reside's idempotency key. Scoped by tenant to
    * match the partial unique index, so two tenants can never collide. */
-  async getMessageByIdempotencyKey(tenantId: string, idempotencyKey: string): Promise<Message | null> {
+  async getMessageByIdempotencyKey(tenantId: TenantId, idempotencyKey: string): Promise<Message | null> {
     const [message] = await this.orm
       .select().from(messages)
       .where(and(eq(messages.tenantId, tenantId), eq(messages.idempotencyKey, idempotencyKey)))
@@ -713,7 +714,7 @@ export class DomainService {
    * machinery the single-send endpoint uses.
    */
   async createOutboundBatch(input: {
-    tenantId: string;
+    tenantId: TenantId;
     channel: "sms" | "email";
     subject?: string;
     body: string;
@@ -875,7 +876,7 @@ export class DomainService {
    * outbound-batch worker, which drains every tenant's batches and has
    * already established which recipient row it is acting on.
    */
-  async getOutboundBatchDetail(batchId: string, tenantId: string): Promise<{
+  async getOutboundBatchDetail(batchId: string, tenantId: TenantId): Promise<{
     batch: OutboundBatch;
     recipients: Array<
       OutboundBatchRecipient & {
@@ -989,7 +990,7 @@ export class DomainService {
   }
 
   async getConversationsForTenant(
-    tenantId: string,
+    tenantId: TenantId,
     filters: ConversationFilters = { limit: 50 },
   ): Promise<ConversationWithIdentity[]> {
     // A merged-away conversation is a dead pointer, not a real inbox item -
@@ -1079,7 +1080,7 @@ export class DomainService {
    * created under an id that later merged into their canonical one.
    */
   async listConversationsForIdentity(
-    tenantId: string,
+    tenantId: TenantId,
     identityId: string,
   ): Promise<ConversationWithIdentity[]> {
     const ids = await this.getIdentityMergeChainIds(identityId);
@@ -1199,7 +1200,7 @@ export class DomainService {
     return map;
   }
 
-  async getTeamsForTenant(tenantId: string): Promise<Team[]> {
+  async getTeamsForTenant(tenantId: TenantId): Promise<Team[]> {
     return this.orm
       .select().from(teams)
       .where(eq(teams.tenantId, tenantId)).orderBy(asc(teams.name));
@@ -1225,7 +1226,7 @@ export class DomainService {
 
   // ---- Tags (Phase 2 / 2A) ----
 
-  async createTag(tenantId: string, name: string, color?: string): Promise<Tag> {
+  async createTag(tenantId: TenantId, name: string, color?: string): Promise<Tag> {
     const [tag] = await this.orm
       .insert(tags)
       .values({ tenantId, name, color: color ?? null })
@@ -1234,7 +1235,7 @@ export class DomainService {
     return tag;
   }
 
-  async listTenantTags(tenantId: string): Promise<Tag[]> {
+  async listTenantTags(tenantId: TenantId): Promise<Tag[]> {
     return this.orm.select().from(tags).where(eq(tags.tenantId, tenantId)).orderBy(asc(tags.name));
   }
 
@@ -1445,7 +1446,7 @@ export class DomainService {
    * show as relevant anyway, but excluding it up front keeps this a single
    * lean query instead of full conversation rows. */
   async getConversationMetricsForViewer(
-    tenantId: string,
+    tenantId: TenantId,
     viewerUserId: string,
   ): Promise<{ unread_relevant_count: number; open_relevant_count: number }> {
     const rows = await this.orm
@@ -1689,7 +1690,7 @@ export class DomainService {
    * target and the source is marked `status: 'merged'` with
    * `merged_into_id` pointing at the target. Returns the canonical target
    * id so the caller can redirect there. */
-  async mergeConversations(tenantId: string, sourceId: string, targetId: string): Promise<string> {
+  async mergeConversations(tenantId: TenantId, sourceId: string, targetId: string): Promise<string> {
     const [canonicalSourceId, canonicalTargetId] = await Promise.all([
       this.resolveConversationId(sourceId),
       this.resolveConversationId(targetId),
@@ -1760,7 +1761,7 @@ export class DomainService {
    * proportionate given how rare and human-paced this operation is; no new
    * locking infrastructure. Returns the new conversation's id. */
   async splitConversation(
-    tenantId: string,
+    tenantId: TenantId,
     sourceConversationId: string,
     splitMessageId: string,
     actorUserId: string | null,
@@ -1910,7 +1911,7 @@ export class DomainService {
    * would tell an admin "the classifier is over-triggering on this
    * tenant," so this caps the blast radius of a systematic misfire rather
    * than relying on per-instance reversibility alone. */
-  async countRecentAiSplits(tenantId: string, sinceMinutes: number): Promise<number> {
+  async countRecentAiSplits(tenantId: TenantId, sinceMinutes: number): Promise<number> {
     const since = new Date(Date.now() - sinceMinutes * 60_000);
     const [row] = await this.orm
       .select({ value: count() })
@@ -1957,7 +1958,7 @@ export class DomainService {
    * (catching the exact gap found in research: two identities that later
    * merged, each with their own pre-existing open conversation), and
    * excludes anything already merged into this one. */
-  async listRelatedConversations(tenantId: string, conversationId: string): Promise<ConversationWithIdentity[]> {
+  async listRelatedConversations(tenantId: TenantId, conversationId: string): Promise<ConversationWithIdentity[]> {
     const canonicalId = await this.resolveConversationId(conversationId);
 
     const [conversation] = await this.orm
@@ -2073,7 +2074,7 @@ export class DomainService {
    * deliberately erring toward one possibly-redundant re-notification over
    * silently suppressing a legitimate one for a conversation whose
    * message set just changed underneath it. */
-  async recomputeConversationSla(tenantId: string, conversationId: string): Promise<void> {
+  async recomputeConversationSla(tenantId: TenantId, conversationId: string): Promise<void> {
     // Chain-aware: a conversation with merge history has messages whose raw
     // conversation_id still points at an earlier, merged-away conversation
     // (merge never rewrites messages.conversationId) - the true message
@@ -2162,7 +2163,7 @@ export class DomainService {
     return updated;
   }
 
-  async getResolvedConversationExamples(tenantId: string, limit = 5) {
+  async getResolvedConversationExamples(tenantId: TenantId, limit = 5) {
     const conversations = await this.orm
       .select({ id: conversationsTable.id, summary: conversationsTable.summary })
       .from(conversationsTable)
@@ -2194,7 +2195,7 @@ export class DomainService {
     });
   }
 
-  async getTenantSettings(tenantId: string) {
+  async getTenantSettings(tenantId: TenantId) {
     const [settings] = await this.orm
       .select().from(tenantSettings)
       .where(eq(tenantSettings.tenantId, tenantId)).limit(1);
@@ -2206,7 +2207,7 @@ export class DomainService {
    * calling it. Plain upsert-by-tenant_id, same idiom as every other settings
    * setter in this codebase. */
   async updateTenantSettings(
-    tenantId: string,
+    tenantId: TenantId,
     patch: Partial<Omit<TenantSettings, "tenantId" | "updatedAt">>,
   ): Promise<TenantSettings> {
     const [settings] = await this.orm
@@ -2249,14 +2250,14 @@ export class DomainService {
    * tenant could drive unbounded embedding-API spend. reside enforces this
    * too before ever calling here (defense in depth), but this is the real
    * boundary since a client can call this endpoint directly. */
-  async countTenantDocuments(tenantId: string): Promise<number> {
+  async countTenantDocuments(tenantId: TenantId): Promise<number> {
     const [row] = await this.orm
       .select({ value: count() }).from(documents)
       .where(eq(documents.tenantId, tenantId));
     return row?.value ?? 0;
   }
 
-  async countTenantChunks(tenantId: string): Promise<number> {
+  async countTenantChunks(tenantId: TenantId): Promise<number> {
     const [row] = await this.orm
       .select({ value: count() }).from(documentChunks)
       .where(eq(documentChunks.tenantId, tenantId));
@@ -2264,7 +2265,7 @@ export class DomainService {
   }
 
   async createDocument(input: {
-    tenantId: string;
+    tenantId: TenantId;
     filename: string;
     contentText: string;
     extractor: string;
@@ -2286,14 +2287,14 @@ export class DomainService {
     return document;
   }
 
-  async listDocumentsForTenant(tenantId: string): Promise<Document[]> {
+  async listDocumentsForTenant(tenantId: TenantId): Promise<Document[]> {
     return this.orm
       .select().from(documents)
       .where(eq(documents.tenantId, tenantId))
       .orderBy(desc(documents.createdAt));
   }
 
-  async getDocument(tenantId: string, documentId: string): Promise<Document | null> {
+  async getDocument(tenantId: TenantId, documentId: string): Promise<Document | null> {
     // Scoped by tenant as well as id: a document id is not proof of ownership.
     const [document] = await this.orm
       .select().from(documents)
@@ -2305,7 +2306,7 @@ export class DomainService {
   /** document_chunks.document_id has ON DELETE CASCADE (migration
    * 20250701001500) - deleting the document row cleans up its chunks
    * automatically, no app-layer delete-then-delete needed. */
-  async deleteDocument(tenantId: string, documentId: string): Promise<void> {
+  async deleteDocument(tenantId: TenantId, documentId: string): Promise<void> {
     await this.orm.delete(documents).where(and(
       eq(documents.id, documentId),
       eq(documents.tenantId, tenantId),
@@ -2363,7 +2364,7 @@ export class DomainService {
    * near-duplicate adjacent chunks from one document can't crowd out other
    * sources in the final top-K. */
   async findSimilarChunks(
-    tenantId: string,
+    tenantId: TenantId,
     queryEmbedding: number[],
     options?: { topK?: number; maxPerDocument?: number; fetchMultiplier?: number },
   ): Promise<Array<{ id: string; documentId: string; heading: string | null; content: string }>> {
@@ -2440,7 +2441,7 @@ export class DomainService {
       .where(and(eq(messages.id, messageId), eq(messages.transcriptionStatus, "pending")));
   }
 
-  private async findIdentityByPhone(tenantId: string, phone: string) {
+  private async findIdentityByPhone(tenantId: TenantId, phone: string) {
     const [identity] = await this.orm
       .select()
       .from(identities)
@@ -2453,7 +2454,7 @@ export class DomainService {
     return identity ?? null;
   }
 
-  private async findIdentityByEmail(tenantId: string, email: string) {
+  private async findIdentityByEmail(tenantId: TenantId, email: string) {
     const [identity] = await this.orm
       .select()
       .from(identities)
@@ -2467,7 +2468,7 @@ export class DomainService {
   }
 
   private async mergeIdentities(
-    tenantId: string,
+    tenantId: TenantId,
     keepId: string,
     mergeId: string,
     matchedOn: "phone" | "email",

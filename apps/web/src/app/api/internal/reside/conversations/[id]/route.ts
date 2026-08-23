@@ -1,8 +1,7 @@
-import {
+import { asResideClientUid,
   createDomainService,
   toResideConversationBase,
-  toResideThread,
-} from "@communication-canoe/database";
+  toResideThread, } from "@communication-canoe/database";
 import { summarizeConversation } from "@communication-canoe/shared/ai";
 import { resideUpdateConversationStatusInputSchema } from "@communication-canoe/shared/schemas";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
@@ -21,7 +20,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return Response.json({ error: "tenantId is required" }, { status: 400 });
   }
 
-  const guard = await resolveTenantScopedConversation(tenantId, id);
+  const guard = await resolveTenantScopedConversation(asResideClientUid(tenantId), id);
   if (!guard.ok) return new Response("Unknown conversation", { status: guard.status });
 
   // Phase 5: a reassignment UI can't show who's currently assigned from a

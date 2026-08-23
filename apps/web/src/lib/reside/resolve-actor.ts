@@ -2,6 +2,7 @@ import { createAdminService } from "@communication-canoe/database";
 import type { ResideActorClaims } from "@communication-canoe/shared/schemas";
 import { auth, authPool } from "@/lib/auth/server";
 import { mapTenantRole } from "@/lib/auth/plugins/reside-sso-plugin";
+import type { ResideClientUid } from "@communication-canoe/database";
 
 /**
  * Phase 3's non-session counterpart to reside-sso-plugin.ts's inline
@@ -53,7 +54,7 @@ export async function findResideUserIdsForUsers(userIds: string[]): Promise<Map<
  * concurrent with themselves in practice.
  */
 export async function resolveOrCreateResideActor(
-  claims: ResideActorClaims & { resideClientUid: string },
+  claims: ResideActorClaims & { resideClientUid: ResideClientUid },
 ): Promise<{ userId: string }> {
   let userId = await findResideActorUserId(claims.resideUserId);
 

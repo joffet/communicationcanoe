@@ -1,7 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import type { TenantId } from "@communication-canoe/shared/brands";
 
 export type ChatSessionPayload = {
-  tenantId: string;
+  tenantId: TenantId;
   conversationId: string;
   identityId: string;
   exp: number;

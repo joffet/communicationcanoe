@@ -1,6 +1,6 @@
 import type WebSocket from "ws";
 import Twilio from "twilio";
-import { createDomainService } from "@communication-canoe/database";
+import { type TenantId, createDomainService, isTenantId } from "@communication-canoe/database";
 import type { BridgeConfig } from "../config.js";
 import { OpenAIRealtimeClient } from "../openai/realtime-client.js";
 import { sessionManager } from "./session-manager.js";
@@ -13,7 +13,7 @@ export class VoiceSession {
   private realtime: OpenAIRealtimeClient | null = null;
   private streamSid: string | null = null;
   private callSid: string | null = null;
-  private tenantId: string | null = null;
+  private tenantId: TenantId | null = null;
   private conversationId: string | null = null;
   private transcriptLines: string[] = [];
 
@@ -30,7 +30,12 @@ export class VoiceSession {
       this.streamSid = start.streamSid as string;
       this.callSid = start.callSid as string;
       const custom = (start.customParameters as Record<string, string>) ?? {};
-      this.tenantId = custom.tenantId ?? null;
+      // Twilio replays these as opaque strings from the <Stream> verb, so this
+      // is a wire boundary: shape-check before treating one as our tenant uuid.
+      // Anything else leaves the session tenantless - a state every caller
+      // below already handles - rather than reaching a uuid column as text.
+      this.tenantId =
+        custom.tenantId && isTenantId(custom.tenantId) ? custom.tenantId : null;
       this.conversationId = custom.conversationId ?? null;
 
       if (this.callSid) sessionManager.registerVoice(this.callSid, this);

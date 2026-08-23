@@ -1,4 +1,4 @@
-import { createDomainService } from "@communication-canoe/database";
+import { type TenantId, createDomainService } from "@communication-canoe/database";
 import type { DomainService } from "@communication-canoe/database";
 import { createTranscriptionProvider, routeConversation } from "@communication-canoe/shared/ai";
 import { loadConfig } from "../config.js";
@@ -89,7 +89,7 @@ async function transcribePendingVoicemails(): Promise<void> {
 async function triggerConversationRouting(
   domain: DomainService,
   conversationId: string,
-  tenantId: string,
+  tenantId: TenantId,
 ): Promise<void> {
   const thread = await domain.getConversationThread(conversationId);
   if (!thread || thread.assignedTeamId) return;

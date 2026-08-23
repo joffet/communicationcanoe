@@ -5,6 +5,7 @@ import { createDb, type Db } from "../db";
 import { normalizeEmail, normalizePhone } from "../client";
 import { tenantSettings, tenants, userTenantMemberships, users } from "../schema";
 import type { PlatformRole, Tenant, User } from "../types";
+import { asResideClientUid, type ResideClientUid, type TenantId } from "@communication-canoe/shared/brands";
 
 /** A tenant as the admin list needs it: the Drizzle row plus the one derived
  * field the table renders. camelCase throughout, like the row it extends. */
@@ -13,7 +14,7 @@ export type AdminTenant = Tenant & {
 };
 
 export type AdminUserMembershipSummary = {
-  tenantId: string;
+  tenantId: TenantId;
   /** Falls back to the id when the tenant is gone - see listAllUsers. */
   tenantName: string;
   role: "admin" | "member";
@@ -24,7 +25,7 @@ export type AdminUser = User & {
 };
 
 export type UserMembershipInput = {
-  tenantId: string;
+  tenantId: TenantId;
   role: "admin" | "member";
 };
 
@@ -70,7 +71,7 @@ export class AdminService {
     }));
   }
 
-  async getTenantById(id: string): Promise<Tenant | null> {
+  async getTenantById(id: TenantId): Promise<Tenant | null> {
     const [tenant] = await this.orm
       .select().from(tenants).where(eq(tenants.id, id)).limit(1);
     return tenant ?? null;
@@ -81,7 +82,7 @@ export class AdminService {
    * by a reside-supplied uid: that uid may be a slug like "cardiff", and
    * getTenantById compares against a uuid column, which Postgres rejects with a
    * cast error rather than simply not matching. */
-  async getTenantByResideClientUid(resideClientUid: string): Promise<Tenant | null> {
+  async getTenantByResideClientUid(resideClientUid: ResideClientUid): Promise<Tenant | null> {
     const [tenant] = await this.orm
       .select().from(tenants)
       .where(eq(tenants.resideClientUid, resideClientUid)).limit(1);
@@ -90,27 +91,33 @@ export class AdminService {
 
   /** Keeps comm-canoe's copy of the client's portal URL in step when a reside
    * admin edits their routing domain. Idempotent; safe to call on every save. */
-  async updateTenantResideAppUrl(resideClientUid: string, resideAppUrl: string | null): Promise<void> {
+  async updateTenantResideAppUrl(resideClientUid: ResideClientUid, resideAppUrl: string | null): Promise<void> {
     await this.orm
       .update(tenants).set({ resideAppUrl })
       .where(eq(tenants.resideClientUid, resideClientUid));
   }
 
   async createTenant(input: {
-    id?: string;
+    id?: TenantId;
     name: string;
     twilioNumber: string;
     inboundEmailAddress: string;
     provisioningSource?: "manual" | "reside";
     /** reside's client uid. Defaults to `id` only for manually-created tenants
      * that predate the split; reside-provisioned tenants always pass it. */
-    resideClientUid?: string;
+    resideClientUid?: ResideClientUid;
     resideAppUrl?: string | null;
   }): Promise<Tenant> {
     const twilioNumber = normalizePhone(input.twilioNumber);
     const inboundEmailAddress = normalizeEmail(input.inboundEmailAddress);
-    const id = input.id ?? randomUUID();
-    const resideClientUid = input.resideClientUid ?? id;
+    const id = input.id ?? (randomUUID() as TenantId);
+    // The one place the two identifiers legitimately hold the same string: a
+    // manually-created tenant that predates the split has no reside uid of its
+    // own, and the migration backfilled those rows with `id::text`. The cast
+    // states that crossing explicitly rather than letting it happen silently -
+    // which is how the ids came to be conflated in the first place.
+    // reside-provisioned tenants always pass their own uid and skip this.
+    const resideClientUid = input.resideClientUid ?? asResideClientUid(id);
 
     // One transaction: a tenant with no settings row is a tenant whose SLA
     // window and greeting read as undefined everywhere downstream.
@@ -143,7 +150,7 @@ export class AdminService {
   }
 
   async updateTenant(
-    id: string,
+    id: TenantId,
     input: {
       name: string;
       twilioNumber: string;
@@ -277,7 +284,7 @@ export class AdminService {
    */
   async upsertTenantMembership(
     userId: string,
-    tenantId: string,
+    tenantId: TenantId,
     role: "admin" | "member",
   ): Promise<void> {
     await this.orm

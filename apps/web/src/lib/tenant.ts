@@ -1,9 +1,9 @@
 import { TENANT_COOKIE } from "@communication-canoe/shared/constants";
 import { cookies } from "next/headers";
-import { createAdminService, createDomainService } from "@communication-canoe/database";
+import { type TenantId, createAdminService, createDomainService } from "@communication-canoe/database";
 import { requireSession } from "@/lib/auth/session";
 
-export async function getActiveTenantId(): Promise<string | null> {
+export async function getActiveTenantId(): Promise<TenantId | null> {
   const session = await requireSession();
   if (!session) return null;
 
@@ -22,8 +22,14 @@ export async function getActiveTenantId(): Promise<string | null> {
 
   const cookieStore = await cookies();
   const selected = cookieStore.get(TENANT_COOKIE)?.value;
-  if (selected && memberships.some((m) => m.tenant.id === selected)) {
-    return selected;
+  // Return the matched membership's own id rather than the cookie string that
+  // matched it. Same value, but this one comes from the database already
+  // carrying TenantId, where the cookie is unvalidated text a client controls.
+  const match = selected
+    ? memberships.find((m) => m.tenant.id === selected)
+    : undefined;
+  if (match) {
+    return match.tenant.id;
   }
 
   return memberships[0]?.tenant.id ?? null;

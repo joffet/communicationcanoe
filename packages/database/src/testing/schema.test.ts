@@ -2,6 +2,7 @@ import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { createTestDb, resetTestDb, type TestDb } from "./pglite";
 import { documents, documentChunks, tenants } from "../schema";
+import { asResideClientUid, type TenantId } from "@communication-canoe/shared/brands";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -34,12 +35,12 @@ async function makeTenant(suffix: string) {
     twilioNumber: `+1555000000${suffix}`,
     inboundEmailAddress: `${suffix}@example.test`,
     chatWidgetKey: `key-${suffix}`,
-    resideClientUid: `client-${suffix}`,
+    resideClientUid: asResideClientUid(`client-${suffix}`),
   }).returning();
   return tenant;
 }
 
-async function makeDocument(tenantId: string) {
+async function makeDocument(tenantId: TenantId) {
   const [doc] = await db.insert(documents).values({
     tenantId, filename: "a.pdf", contentText: "hello", extractor: "test",
   }).returning();

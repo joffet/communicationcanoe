@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { createDomainService } from "@communication-canoe/database";
+import { type TenantId, createDomainService } from "@communication-canoe/database";
 import type {
   CaptureContactInfoArgs,
   TransferToHumanArgs,
@@ -31,7 +31,7 @@ export class ChatSession {
 
   constructor(
     public ws: WebSocket,
-    public tenantId: string,
+    public tenantId: TenantId,
     public conversationId: string,
     public identityId: string,
     public sessionToken: string,

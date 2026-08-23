@@ -11,7 +11,8 @@
     "./constants": "./src/constants.ts",
     "./realtime": "./src/realtime/index.ts",
     "./retry": "./src/retry.ts",
-    "./knowledge": "./src/knowledge/index.ts"
+    "./knowledge": "./src/knowledge/index.ts",
+    "./brands": "./src/brands.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

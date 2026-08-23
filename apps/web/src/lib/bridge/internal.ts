@@ -1,4 +1,5 @@
 import { createDomainService } from "@communication-canoe/database";
+import type { TenantId } from "@communication-canoe/database";
 
 function verifyInternalSecret(request: Request): boolean {
   const secret = process.env.INTERNAL_API_SECRET;
@@ -18,7 +19,7 @@ export function getBridgeUrl(): string {
 
 export async function notifyBridgeHandoffJoin(payload: {
   conversationId: string;
-  tenantId: string;
+  tenantId: TenantId;
   agentUserId: string;
   agentName?: string;
 }) {
@@ -51,7 +52,7 @@ export async function notifyBridgeAgentMessage(payload: {
   return res.ok;
 }
 
-export async function getOnCallUsers(tenantId: string, teamId?: string | null) {
+export async function getOnCallUsers(tenantId: TenantId, teamId?: string | null) {
   const domain = createDomainService();
   return domain.getOnCallUsers(tenantId, teamId);
 }

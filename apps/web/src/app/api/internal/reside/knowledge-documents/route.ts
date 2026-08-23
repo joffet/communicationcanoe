@@ -1,8 +1,7 @@
-import {
+import { asResideClientUid,
   createAdminService,
   createDomainService,
-  toResideKnowledgeDocument,
-} from "@communication-canoe/database";
+  toResideKnowledgeDocument, } from "@communication-canoe/database";
 import { resideCreateKnowledgeDocumentInputSchema } from "@communication-canoe/shared/schemas";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
 
@@ -22,7 +21,7 @@ export async function GET(request: Request) {
     return Response.json({ error: "tenantId is required" }, { status: 400 });
   }
 
-  const tenant = await createAdminService().getTenantByResideClientUid(resideClientUid);
+  const tenant = await createAdminService().getTenantByResideClientUid(asResideClientUid(resideClientUid));
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }
@@ -43,7 +42,7 @@ export async function POST(request: Request) {
 
   const { tenantId: resideClientUid, filename, contentText, extractor, pageCount, uploadedBy } = parsed.data;
 
-  const tenant = await createAdminService().getTenantByResideClientUid(resideClientUid);
+  const tenant = await createAdminService().getTenantByResideClientUid(asResideClientUid(resideClientUid));
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }

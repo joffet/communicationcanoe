@@ -3,6 +3,7 @@ import { DomainService } from "./index";
 import type { AppSupabaseClient } from "../client";
 import { createTestDb, resetTestDb, type TestDb } from "../testing/pglite";
 import { tenants } from "../schema";
+import { asResideClientUid } from "@communication-canoe/shared/brands";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -27,7 +28,7 @@ async function makeTenant(suffix = "1") {
     twilioNumber: `+1555000000${suffix}`,
     inboundEmailAddress: `${suffix}@example.test`,
     chatWidgetKey: `key-${suffix}`,
-    resideClientUid: `client-${suffix}`,
+    resideClientUid: asResideClientUid(`client-${suffix}`),
   }).returning();
   return tenant;
 }

@@ -1,6 +1,7 @@
 import { createAdminService, createDomainService } from "@communication-canoe/database";
 import { redirect } from "next/navigation";
 import { requireSession } from "./session";
+import type { TenantId } from "@communication-canoe/database";
 
 const MSG_SIGN_IN = "You must be signed in to perform this action.";
 const MSG_SUPER_ADMIN_REQUIRED = "Super admin access is required.";
@@ -40,7 +41,7 @@ export async function requireSuperAdminAction(): Promise<
   return { ok: true, session, admin };
 }
 
-export async function requireTenantMembership(tenantId: string) {
+export async function requireTenantMembership(tenantId: TenantId) {
   const session = await requireSession();
   if (!session) return null;
 

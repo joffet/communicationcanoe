@@ -3,6 +3,7 @@ import { DomainService } from "./index";
 import type { AppSupabaseClient } from "../client";
 import { createTestDb, resetTestDb, type TestDb } from "../testing/pglite";
 import { conversations, identities, tenants, users } from "../schema";
+import { asResideClientUid } from "@communication-canoe/shared/brands";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -27,7 +28,7 @@ beforeEach(async () => {
 async function seed() {
   const [tenant] = await db.insert(tenants).values({
     name: "Tenant", twilioNumber: "+15550000001",
-    inboundEmailAddress: "t@example.test", chatWidgetKey: "key", resideClientUid: "client",
+    inboundEmailAddress: "t@example.test", chatWidgetKey: "key", resideClientUid: asResideClientUid("client"),
   }).returning();
   await db.insert(users).values([
     { id: VIEWER, email: "viewer@example.test", name: "Viewer" },
@@ -59,7 +60,7 @@ describe("tags", () => {
     const { tenant } = await seed();
     const [other] = await db.insert(tenants).values({
       name: "Other", twilioNumber: "+15550000009",
-      inboundEmailAddress: "o@example.test", chatWidgetKey: "key-o", resideClientUid: "client-o",
+      inboundEmailAddress: "o@example.test", chatWidgetKey: "key-o", resideClientUid: asResideClientUid("client-o"),
     }).returning();
 
     await domain.createTag(other.id, "theirs");

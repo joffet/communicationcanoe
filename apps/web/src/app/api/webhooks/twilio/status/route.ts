@@ -1,5 +1,5 @@
 import twilio from "twilio";
-import { createAdminService, createDomainService } from "@communication-canoe/database";
+import { type TenantId, createAdminService, createDomainService } from "@communication-canoe/database";
 import type { MessageDeliveryStatus } from "@communication-canoe/database";
 import { notifyResideIdentityStatus } from "@/lib/reside/identity-status-client";
 
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
 
 async function recordOutcomeAndMaybeNotifyReside(
   domain: ReturnType<typeof createDomainService>,
-  message: { id: string; tenantId: string; conversationId: string },
+  message: { id: string; tenantId: TenantId; conversationId: string },
   outcome: "success" | "hard_failure",
 ): Promise<void> {
   const thread = await domain.getConversationThread(message.conversationId);

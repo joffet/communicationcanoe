@@ -1,4 +1,4 @@
-import { createAdminService, createDomainService } from "@communication-canoe/database";
+import { asResideClientUid, createAdminService, createDomainService } from "@communication-canoe/database";
 import { resideUpdateTenantSettingsInputSchema } from "@communication-canoe/shared/schemas";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
 
@@ -16,7 +16,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   // Route segment is reside's client uid, not comm-canoe's tenant uuid.
   const { id: resideClientUid } = await params;
-  const tenant = await createAdminService().getTenantByResideClientUid(resideClientUid);
+  const tenant = await createAdminService().getTenantByResideClientUid(asResideClientUid(resideClientUid));
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }
@@ -60,7 +60,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const admin = createAdminService();
-  const tenant = await admin.getTenantByResideClientUid(id);
+  const tenant = await admin.getTenantByResideClientUid(asResideClientUid(id));
   if (!tenant) {
     return new Response("Unknown tenant", { status: 404 });
   }

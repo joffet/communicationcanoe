@@ -1,4 +1,4 @@
-import { createAdminService, createDomainService } from "@communication-canoe/database";
+import { asResideClientUid, createAdminService, createDomainService } from "@communication-canoe/database";
 import { z } from "zod";
 import { verifyResideSecret } from "@/lib/reside/api-secret";
 import { findResideActorUserId } from "@/lib/reside/resolve-actor";
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   // reside's client uid (may be a slug), resolved to the internal tenant id below.
-  const resideClientUidParsed = z.string().min(1).safeParse(url.searchParams.get("tenantId"));
+  const resideClientUidParsed = z.string().min(1).transform(asResideClientUid).safeParse(url.searchParams.get("tenantId"));
   if (!resideClientUidParsed.success) {
     return Response.json({ error: "tenantId is required" }, { status: 400 });
   }

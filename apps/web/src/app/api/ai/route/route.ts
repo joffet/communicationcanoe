@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     return Response.json({ teamId: thread.assignedTeamId, reasoning: "Already assigned" });
   }
 
-  const teams = await domain.getTeamsForTenant(body.tenantId);
+  const teams = await domain.getTeamsForTenant(thread.tenantId);
   const lastInbound = [...thread.messages].reverse().find((m) => m.direction === "inbound");
   if (!lastInbound) {
     return Response.json({ teamId: null, reasoning: "No inbound message" });

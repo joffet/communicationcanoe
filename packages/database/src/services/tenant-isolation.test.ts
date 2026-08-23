@@ -36,6 +36,7 @@ import {
   userTenantMemberships,
   users,
 } from "../schema";
+import { asResideClientUid } from "@communication-canoe/shared/brands";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -60,7 +61,7 @@ async function seedTenant(n: string) {
       twilioNumber: `+1555000000${n}`,
       inboundEmailAddress: `tenant${n}@example.test`,
       chatWidgetKey: `widget-key-${n}`,
-      resideClientUid: `client-${n}`,
+      resideClientUid: asResideClientUid(`client-${n}`),
     })
     .returning();
 
