@@ -103,3 +103,37 @@ describe("conversation participants", () => {
     expect(listed).toHaveLength(2);
   });
 });
+
+describe("live transfers", () => {
+  it("keeps the AI's escalation reason and stops reporting it once answered", async () => {
+    const { tenant, conversation } = await seed();
+
+    const transfer = await domain.logLiveTransfer({
+      tenantId: tenant.id,
+      conversationId: conversation.id,
+      channel: "web_chat",
+      outcome: "pending",
+      reason: "Visitor asked for a human about a billing dispute",
+    });
+    expect(transfer.reason).toBe("Visitor asked for a human about a billing dispute");
+
+    const pending = await domain.getPendingLiveTransfer(conversation.id, tenant.id);
+    expect(pending?.id).toBe(transfer.id);
+
+    await domain.updateLiveTransferOutcome(transfer.id, "answered", VIEWER);
+    expect(await domain.getPendingLiveTransfer(conversation.id, tenant.id)).toBeNull();
+  });
+
+  it("logs a transfer with no reason, since the voice failure path has none", async () => {
+    const { tenant, conversation } = await seed();
+
+    const transfer = await domain.logLiveTransfer({
+      tenantId: tenant.id,
+      conversationId: conversation.id,
+      channel: "voice",
+      outcome: "no_answer",
+    });
+
+    expect(transfer.reason).toBeNull();
+  });
+});

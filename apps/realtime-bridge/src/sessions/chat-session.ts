@@ -202,12 +202,15 @@ export class ChatSession {
       conversationId: this.conversationId,
       channel: "web_chat",
       outcome: "pending",
+      reason,
     });
     this.activeTransferId = transfer.id;
 
+    // `reason` deliberately stays out of this payload: chat:tenant:* is a
+    // public channel, subscribable by any holder of the anon key. The
+    // dashboard reads it from the tenant-scoped conversation route instead.
     await broadcastNeedsHuman(this.tenantId, {
       conversationId: this.conversationId,
-      reason,
       transferId: transfer.id,
     });
 

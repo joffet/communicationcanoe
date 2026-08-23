@@ -129,8 +129,8 @@ const CALLER_ENFORCED = [
 describe("tenant scoping census", () => {
   it("finds the service surface (sanity check that the parse works)", () => {
     const methods = publicMethods();
-    // All 95, including the seven with no return-type annotation.
-    expect(methods.length).toBe(95);
+    // All 96, including the seven with no return-type annotation.
+    expect(methods.length).toBe(96);
     expect(methods.map((m) => m.name)).toContain("getConversationsForTenant");
   });
 

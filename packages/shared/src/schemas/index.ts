@@ -77,6 +77,8 @@ export const logLiveTransferInputSchema = z.object({
   attemptedUserId: z.string().uuid().optional(),
   messageId: z.string().uuid().optional(),
   outcome: z.enum(["pending", "answered", "no_answer", "declined"]),
+  /** The AI's account of why it escalated, from `transfer_to_human`. */
+  reason: z.string().optional(),
 });
 
 export const conversationFiltersSchema = z.object({

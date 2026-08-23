@@ -682,6 +682,13 @@ export const liveTransfers = pgTable(
     /** 20250621140000 */
     channel: liveTransferChannelEnum("channel").notNull().default("voice"),
     outcome: liveTransferOutcomeEnum("outcome").notNull(),
+    /**
+     * The AI's own account of why it escalated, from the `transfer_to_human`
+     * tool call. Nullable: every row written before this column existed has
+     * none, and a transfer logged for a failure path (no on-call agent) may
+     * not carry one either.
+     */
+    reason: text("reason"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
