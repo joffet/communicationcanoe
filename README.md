@@ -17,7 +17,7 @@ supabase/             Pre-cutover migration history and dev seed — no longer a
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22.13+ (the root `package.json` `engines` field requires it)
 - pnpm 9+ (`corepack enable`)
 - [PlanetScale](https://planetscale.com) Postgres database (app data), plus a hosted [Supabase](https://supabase.com) project for Realtime
 
@@ -77,7 +77,14 @@ VALUES ('YOUR_USER_ID', '11111111-1111-1111-1111-111111111111', 'admin');
 
 Magic links send from `info@communicationcanoe.com` by default. Tenant-scoped outbound email uses each tenant's `inbound_email_address` when available (must be verified in SES).
 
-**Tenant isolation** is enforced in application code and nowhere else: every dashboard/API route verifies session + `user_tenant_memberships` before querying with an explicit `tenant_id`. There is no RLS backstop — the Supabase policies keyed off `auth.uid()` and were dropped at the cutover rather than ported, so each `WHERE tenant_id = $1` *is* the boundary. [tenant-isolation.test.ts](packages/database/src/services/tenant-isolation.test.ts) is what replaced them; new service methods need a case there.
+**Tenant isolation** is enforced in application code and nowhere else: every dashboard/API route verifies session + `user_tenant_memberships` before querying with an explicit `tenant_id`. There is no RLS backstop — the Supabase policies keyed off `auth.uid()` and were dropped at the cutover rather than ported, so each `WHERE tenant_id = $1` *is* the boundary.
+
+Two test files replaced them, covering the two different ways a method can be scoped:
+
+- [tenant-isolation.test.ts](packages/database/src/services/tenant-isolation.test.ts) — for methods that take a `tenantId`, proves they actually use it. Builds two complete parallel tenants and asks tenant A's service call for tenant B's row. New service methods need a case here.
+- [tenant-scoping-census.test.ts](packages/database/src/services/tenant-scoping-census.test.ts) — for the 47 methods that take an entity id and **no** tenant, where the *caller* is the boundary. Five of the tables they touch have no `tenant_id` column to filter on, so a method given only an id cannot know whose id it is. The file is a liability register that fails when it changes, forcing a choice: take a `tenantId` and filter by it, or add the name and accept that every call site must prove ownership first.
+
+Every cross-tenant bug this app has shipped came from that second category.
 
 ## Super Admin and Platform Admin
 
@@ -136,6 +143,7 @@ When adding a user from admin, the **Send sign-in email** toggle (default on) se
 |---|---|
 | `pnpm dev` | Start web + realtime-bridge |
 | `pnpm build` | Production build |
+| `pnpm test` | Vitest across packages — tenant isolation, scoping census, schema parity, service logic |
 | `pnpm db:generate` | Generate a migration from changes to `packages/database/src/schema/index.ts` |
 | `pnpm db:migrate` | Apply pending Drizzle migrations (uses `MIGRATION_DATABASE_URL`) |
 | `pnpm db:studio` | Open Drizzle Studio against the database |

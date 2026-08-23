@@ -18,6 +18,7 @@ Persistent WebSocket service bridging Twilio Media Streams and embeddable chat w
 ```bash
 REALTIME_BRIDGE_PORT=3001
 OPENAI_API_KEY=
+DATABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 NEXT_PUBLIC_SUPABASE_URL=
 INTERNAL_API_SECRET=
@@ -29,6 +30,12 @@ TWILIO_AUTH_TOKEN=
 ```
 
 `VOICE_BRIDGE_PORT` is accepted as a backward-compatible alias for `REALTIME_BRIDGE_PORT`.
+
+`DATABASE_URL` is the PlanetScale connection every Postgres read here goes
+through. All seven polling workers in `src/workers/` hit it on each tick, and
+the service logs which host and database it resolved to at boot. The two
+`SUPABASE_*` variables are for Realtime broadcasts only; no query reaches a
+database through them.
 
 ## Development
 
