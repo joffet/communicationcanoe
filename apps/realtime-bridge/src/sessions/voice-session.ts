@@ -16,7 +16,11 @@ export class VoiceSession {
   private callSid: string | null = null;
   private tenantId: string | null = null;
   private conversationId: string | null = null;
-  private transcriptLines: string[] = [];
+  // Item ids in the order the conversation produced them, and the line each
+  // one resolved to. Two maps rather than one array because a transcript can
+  // arrive after the next turn has already started - see onTranscriptDone.
+  private transcriptOrder: string[] = [];
+  private transcriptLines = new Map<string, string>();
 
   constructor(
     public ws: WebSocket,
@@ -67,6 +71,14 @@ export class VoiceSession {
             media: { payload: delta },
           }),
         );
+      },
+      onItemAdded: (itemId) => {
+        if (!this.transcriptOrder.includes(itemId)) this.transcriptOrder.push(itemId);
+      },
+      onTranscriptDone: (itemId, side, text) => {
+        if (!text.trim()) return;
+        if (!this.transcriptOrder.includes(itemId)) this.transcriptOrder.push(itemId);
+        this.transcriptLines.set(itemId, `${side === "input" ? "Caller" : "Agent"}: ${text}`);
       },
       onToolCall: (name, args, callId) => {
         void this.handleToolCall(name, args, callId);
@@ -142,9 +154,13 @@ export class VoiceSession {
   }
 
   private async finalizeCall() {
-    if (!this.tenantId || !this.conversationId || !this.transcriptLines.length) return;
+    const body = this.transcriptOrder
+      .map((id) => this.transcriptLines.get(id))
+      .filter((line): line is string => Boolean(line))
+      .join("\n");
 
-    const body = this.transcriptLines.join("\n");
+    if (!this.tenantId || !this.conversationId || !body) return;
+
     await this.domain.appendMessage({
       tenantId: this.tenantId,
       conversationId: this.conversationId,

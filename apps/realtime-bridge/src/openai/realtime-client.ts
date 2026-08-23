@@ -9,6 +9,8 @@ export type RealtimeClientOptions = {
   onTextDelta?: (delta: string) => void;
   onTextDone?: (text: string) => void;
   onAudioDelta?: (delta: string) => void;
+  onItemAdded?: (itemId: string) => void;
+  onTranscriptDone?: (itemId: string, side: "input" | "output", text: string) => void;
   onToolCall?: (name: string, args: Record<string, unknown>, callId: string) => void;
   onError?: (error: Error) => void;
 };
@@ -67,6 +69,10 @@ export class OpenAIRealtimeClient {
         input: {
           format: { type: "audio/pcmu" },
           turn_detection: { type: "server_vad" },
+          // Without this the caller's own speech is never transcribed - the
+          // model hears it, but conversation.item.input_audio_transcription.*
+          // only fires when a transcription model is configured.
+          transcription: { model: "gpt-4o-mini-transcribe" },
         },
         output: {
           format: { type: "audio/pcmu" },
@@ -140,6 +146,30 @@ export class OpenAIRealtimeClient {
 
     if (type === "response.output_audio.delta") {
       this.options.onAudioDelta?.((event.delta as string) ?? "");
+    }
+
+    // Item ids arrive in conversation order; the transcripts that fill them do
+    // not, because the caller's transcription runs alongside the model's reply
+    // and can land after it. Callers that care about order track ids from here.
+    if (type === "conversation.item.added") {
+      const item = event.item as Record<string, unknown> | undefined;
+      if (item?.id) this.options.onItemAdded?.(item.id as string);
+    }
+
+    if (type === "conversation.item.input_audio_transcription.completed") {
+      this.options.onTranscriptDone?.(
+        event.item_id as string,
+        "input",
+        (event.transcript as string) ?? "",
+      );
+    }
+
+    if (type === "response.output_audio_transcript.done") {
+      this.options.onTranscriptDone?.(
+        event.item_id as string,
+        "output",
+        (event.transcript as string) ?? "",
+      );
     }
 
     if (type === "response.output_item.done") {
