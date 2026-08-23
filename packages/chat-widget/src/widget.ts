@@ -57,6 +57,8 @@ class CanoeChatWidget {
   private messagesEl: HTMLElement;
   private inputEl: HTMLInputElement;
   private panelOpen = false;
+  private outbox: string[] = [];
+  private localEchoes: string[] = [];
 
   constructor() {
     this.widgetKey = getWidgetKey();
@@ -126,13 +128,24 @@ class CanoeChatWidget {
     root.querySelector(".canoe-compose")!.addEventListener("submit", (e) => {
       e.preventDefault();
       const text = this.inputEl.value.trim();
-      if (!text || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      if (!text) return;
       this.appendMessage(text, "outbound");
-      this.ws.send(JSON.stringify({ type: "message", text }));
+      this.localEchoes.push(text);
+      this.sendVisitorMessage(text);
       this.inputEl.value = "";
     });
 
     return root;
+  }
+
+  // The compose box is live the moment the visitor starts a chat, but the
+  // socket may still be connecting - hold the message rather than dropping it.
+  private sendVisitorMessage(text: string) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "message", text }));
+      return;
+    }
+    this.outbox.push(text);
   }
 
   private initSession(opts: { name?: string; email?: string; skipAnonymous?: boolean }) {
@@ -173,6 +186,10 @@ class CanoeChatWidget {
           skipAnonymous: init?.skipAnonymous,
         }),
       );
+
+      for (const text of this.outbox.splice(0)) {
+        this.ws!.send(JSON.stringify({ type: "message", text }));
+      }
     };
 
     this.ws.onmessage = (ev) => {
@@ -212,6 +229,13 @@ class CanoeChatWidget {
         const dir = m.direction === "inbound" ? "inbound" : "outbound";
         this.appendMessage(m.body, dir === "inbound" ? "inbound" : "outbound");
       }
+      // History is fetched during session start, so anything the visitor typed
+      // in the meantime is still queued server-side and absent from it. Wiping
+      // the transcript would erase those bubbles even though they will be
+      // answered, so re-show the ones this history doesn't account for.
+      const known = new Set(msg.messages.map((m) => m.body));
+      this.localEchoes = this.localEchoes.filter((text) => !known.has(text));
+      for (const text of this.localEchoes) this.appendMessage(text, "outbound");
       return;
     }
 

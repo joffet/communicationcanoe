@@ -7,6 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc && pnpm --filter @communication-canoe/chat-widget build:copy",
     "start": "tsx src/index.ts",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'no lint configured'"
   },
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@types/node": "^20.19.43",
     "@types/ws": "^8.18.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   }
 }
