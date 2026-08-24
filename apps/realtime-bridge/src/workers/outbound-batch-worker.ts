@@ -1,8 +1,35 @@
 import { createAdminService, createDomainService } from "@communication-canoe/database";
+import type { AdminService, DomainService } from "@communication-canoe/database";
 import { dispatchOutboundMessage } from "@communication-canoe/messaging";
 
 const POLL_INTERVAL_MS = 7_000;
-const BATCH_LIMIT = 25;
+
+/**
+ * How many recipients one pass claims.
+ *
+ * Was 25, drained one at a time. Each recipient costs five or six database
+ * round trips plus an SES call, so a pass took longer than the poll interval
+ * and ticks overlapped - the atomic claim kept that correct, but the second
+ * tick spent itself losing claims. A thousand-recipient notice took twenty
+ * minutes of that.
+ */
+const BATCH_LIMIT = 100;
+
+/**
+ * How many of those run at once.
+ *
+ * The ceiling that matters is the SES account's sending rate, not this number
+ * - exceed it and SES throttles, which surfaces as failed recipients rather
+ * than as backpressure. Eight is deliberately below any production SES quota;
+ * raise it against the account's real limit rather than by feel, and remember
+ * every one of these also holds a database connection.
+ */
+const CONCURRENCY = Number(process.env.OUTBOUND_BATCH_CONCURRENCY ?? 8);
+
+/** A pass stops after this many rounds even if work remains, so one enormous
+ * batch cannot hold the loop past the next tick forever. What is left is
+ * picked up on the following tick. */
+const MAX_ROUNDS_PER_TICK = 10;
 /** How long a claimed ("sending") recipient may sit unresolved before another
  * tick assumes the claiming replica died and returns it to pending. Well above
  * the time a single dispatch takes, so a slow-but-alive send is never stolen
@@ -22,13 +49,54 @@ const STUCK_CLAIM_TIMEOUT_MS = 5 * 60_000;
  * service is ever horizontally scaled.
  */
 export function startOutboundBatchWorker(): void {
+  // A tick that is still draining must not start a second one. The claim makes
+  // an overlap safe rather than useful: the newcomer reads the same pending
+  // rows, loses every claim to the pass already holding them, and spends a
+  // round trip each to find that out.
+  let draining = false;
+
   setInterval(() => {
-    void drainPendingRecipients().catch((err) => {
-      console.error("[outbound-batch-worker] tick failed:", err);
-    });
+    if (draining) return;
+    draining = true;
+    void drainPendingRecipients()
+      .catch((err) => {
+        console.error("[outbound-batch-worker] tick failed:", err);
+      })
+      .finally(() => {
+        draining = false;
+      });
   }, POLL_INTERVAL_MS);
-  console.log(`[outbound-batch-worker] polling every ${POLL_INTERVAL_MS}ms`);
+  console.log(
+    `[outbound-batch-worker] polling every ${POLL_INTERVAL_MS}ms, ${CONCURRENCY} at a time`,
+  );
 }
+
+/** Runs tasks with a bounded number in flight. Hand-rolled rather than adding
+ * p-limit for one call site: the workers package has no runtime dependencies
+ * of its own and this is the whole of what would be imported. */
+async function mapWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  run: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    while (next < items.length) {
+      const item = items[next++];
+      // `run` handles its own failures; anything escaping would kill this
+      // worker and quietly reduce the concurrency for the rest of the pass.
+      await run(item).catch((err) => {
+        console.error("[outbound-batch-worker] unhandled recipient error:", err);
+      });
+    }
+  });
+  await Promise.all(workers);
+}
+
+type Caches = {
+  tenants: Map<string, Promise<Awaited<ReturnType<AdminService["getTenantById"]>>>>;
+  batches: Map<string, Promise<Awaited<ReturnType<DomainService["getOutboundBatch"]>>>>;
+};
 
 async function drainPendingRecipients(): Promise<void> {
   const domain = createDomainService();
@@ -42,99 +110,119 @@ async function drainPendingRecipients(): Promise<void> {
     console.log(`[outbound-batch-worker] reclaimed ${reclaimed} stuck recipient(s)`);
   }
 
-  const recipients = await domain.listPendingOutboundBatchRecipients(BATCH_LIMIT);
-  if (recipients.length === 0) return;
+  // Many recipients in one pass typically belong to the same batch/tenant -
+  // cache both lookups rather than refetching per recipient. The PROMISE is
+  // cached, not the result: with several recipients in flight at once, caching
+  // the resolved value lets every one of them miss and fetch before the first
+  // finishes writing it back.
+  const caches: Caches = { tenants: new Map(), batches: new Map() };
 
-  console.log(`[outbound-batch-worker] draining ${recipients.length} recipient(s)`);
+  for (let round = 0; round < MAX_ROUNDS_PER_TICK; round++) {
+    const recipients = await domain.listPendingOutboundBatchRecipients(BATCH_LIMIT);
+    if (recipients.length === 0) return;
 
-  // Many recipients in one tick typically belong to the same batch/tenant -
-  // cache both lookups within the tick rather than refetching per recipient.
-  const tenantCache = new Map<string, Awaited<ReturnType<typeof admin.getTenantById>>>();
-  const batchCache = new Map<string, Awaited<ReturnType<typeof domain.getOutboundBatch>>>();
+    console.log(
+      `[outbound-batch-worker] draining ${recipients.length} recipient(s), round ${round + 1}`,
+    );
+    await mapWithConcurrency(recipients, CONCURRENCY, (recipient) =>
+      processRecipient(domain, admin, caches, recipient),
+    );
 
-  for (const recipient of recipients) {
-    try {
-      // Claim BEFORE any send. Without this two replicas both read the same
-      // pending rows and both dispatch - on a Notice to hundreds of residents,
-      // hundreds of duplicate emails. A lost claim just means another replica
-      // owns this recipient.
-      const claimed = await domain.claimOutboundBatchRecipient(recipient.id);
-      if (!claimed) continue;
+    // A short pass means the queue is drained; anything else and there is more
+    // waiting, so keep going rather than idling until the next tick.
+    if (recipients.length < BATCH_LIMIT) return;
+  }
+}
 
-      let tenant = tenantCache.get(recipient.tenantId);
-      if (tenant === undefined) {
-        tenant = await admin.getTenantById(recipient.tenantId);
-        tenantCache.set(recipient.tenantId, tenant);
-      }
-      if (!tenant) {
-        await failRecipient(domain, recipient.id, recipient.batchId, `Unknown tenant: ${recipient.tenantId}`);
-        continue;
-      }
+async function processRecipient(
+  domain: ReturnType<typeof createDomainService>,
+  admin: ReturnType<typeof createAdminService>,
+  caches: Caches,
+  recipient: Awaited<ReturnType<DomainService["listPendingOutboundBatchRecipients"]>>[number],
+): Promise<void> {
+  try {
+    // Claim BEFORE any send. Without this two replicas both read the same
+    // pending rows and both dispatch - on a Notice to hundreds of residents,
+    // hundreds of duplicate emails. A lost claim just means another replica
+    // owns this recipient.
+    const claimed = await domain.claimOutboundBatchRecipient(recipient.id);
+    if (!claimed) return;
 
-      let batch = batchCache.get(recipient.batchId);
-      if (batch === undefined) {
-        batch = await domain.getOutboundBatch(recipient.batchId);
-        batchCache.set(recipient.batchId, batch);
-      }
+    let tenantPromise = caches.tenants.get(recipient.tenantId);
+    if (!tenantPromise) {
+      tenantPromise = admin.getTenantById(recipient.tenantId);
+      caches.tenants.set(recipient.tenantId, tenantPromise);
+    }
+    const tenant = await tenantPromise;
+    if (!tenant) {
+      await failRecipient(domain, recipient.id, recipient.batchId, `Unknown tenant: ${recipient.tenantId}`);
+      return;
+    }
 
-      const identity = recipient.identityContact as {
-        phone?: string;
-        email?: string;
-        name?: string;
-        resideResidentId?: string;
-      };
+    let batchPromise = caches.batches.get(recipient.batchId);
+    if (!batchPromise) {
+      batchPromise = domain.getOutboundBatch(recipient.batchId);
+      caches.batches.set(recipient.batchId, batchPromise);
+    }
+    const batch = await batchPromise;
 
-      const to = recipient.channel === "sms" ? identity.phone : identity.email;
-      if (!to) {
-        await failRecipient(
-          domain,
-          recipient.id,
-          recipient.batchId,
-          `identity is missing ${recipient.channel === "sms" ? "phone" : "email"}`,
-        );
-        continue;
-      }
+    const identity = recipient.identityContact as {
+      phone?: string;
+      email?: string;
+      name?: string;
+      resideResidentId?: string;
+    };
 
-      const resolvedIdentity = await domain.findOrCreateIdentity(recipient.tenantId, identity);
-      // Outbound/system-attributed send - no topic to classify, isStale is
-      // irrelevant here (Phase 9's staleness check only matters for
-      // inbound resident messages).
-      const { conversation } = await domain.findOrCreateConversation(recipient.tenantId, resolvedIdentity.id, {
-        channel: recipient.channel,
-      });
-
-      const message = await domain.appendMessage({
-        tenantId: recipient.tenantId,
-        conversationId: conversation.id,
-        channel: recipient.channel,
-        direction: "outbound",
-        senderType: "system",
-        body: recipient.body,
-        subject: batch?.subject ?? undefined,
-        deliveryStatus: "queued",
-        // Reside Notices/bulk-send recipients - actually delivered to residents.
-        visibility: "external",
-      });
-
-      const sent = await dispatchOutboundMessage({ tenant, message, to });
-
-      await domain.updateOutboundBatchRecipientStatus(recipient.id, {
-        status: sent.deliveryStatus === "failed" ? "failed" : "sent",
-        messageId: sent.id,
-        error: sent.deliveryError ?? null,
-      });
-      await domain.incrementOutboundBatchCompleted(recipient.batchId);
-    } catch (err) {
-      console.error(`[outbound-batch-worker] recipient ${recipient.id} failed:`, err);
+    const to = recipient.channel === "sms" ? identity.phone : identity.email;
+    if (!to) {
       await failRecipient(
         domain,
         recipient.id,
         recipient.batchId,
-        err instanceof Error ? err.message : String(err),
-      ).catch((innerErr) => {
-        console.error(`[outbound-batch-worker] failed to record failure for ${recipient.id}:`, innerErr);
-      });
+        `identity is missing ${recipient.channel === "sms" ? "phone" : "email"}`,
+      );
+      return;
     }
+
+    const resolvedIdentity = await domain.findOrCreateIdentity(recipient.tenantId, identity);
+    // Outbound/system-attributed send - no topic to classify, isStale is
+    // irrelevant here (Phase 9's staleness check only matters for
+    // inbound resident messages).
+    const { conversation } = await domain.findOrCreateConversation(recipient.tenantId, resolvedIdentity.id, {
+      channel: recipient.channel,
+    });
+
+    const message = await domain.appendMessage({
+      tenantId: recipient.tenantId,
+      conversationId: conversation.id,
+      channel: recipient.channel,
+      direction: "outbound",
+      senderType: "system",
+      body: recipient.body,
+      subject: batch?.subject ?? undefined,
+      deliveryStatus: "queued",
+      // Reside Notices/bulk-send recipients - actually delivered to residents.
+      visibility: "external",
+    });
+
+    const sent = await dispatchOutboundMessage({ tenant, message, to });
+
+    await domain.updateOutboundBatchRecipientStatus(recipient.id, {
+      status: sent.deliveryStatus === "failed" ? "failed" : "sent",
+      messageId: sent.id,
+      error: sent.deliveryError ?? null,
+    });
+    await domain.incrementOutboundBatchCompleted(recipient.batchId);
+  } catch (err) {
+    console.error(`[outbound-batch-worker] recipient ${recipient.id} failed:`, err);
+    await failRecipient(
+      domain,
+      recipient.id,
+      recipient.batchId,
+      err instanceof Error ? err.message : String(err),
+    ).catch((innerErr) => {
+      console.error(`[outbound-batch-worker] failed to record failure for ${recipient.id}:`, innerErr);
+    });
   }
 }
 

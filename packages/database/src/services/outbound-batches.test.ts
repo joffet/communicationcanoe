@@ -111,3 +111,61 @@ describe("getOutboundBatchDetail", () => {
     });
   });
 });
+
+describe("incrementOutboundBatchCompleted", () => {
+  async function batchOf(tenantId: TenantId, total: number) {
+    const [batch] = await db
+      .insert(outboundBatches)
+      .values({ tenantId, channel: "email", status: "pending", totalRecipients: total })
+      .returning();
+    return batch;
+  }
+
+  /**
+   * The reason this had to stop being a read-then-write before the drain could
+   * run recipients in parallel.
+   *
+   * Two finishers reading the same count and both writing it plus one loses a
+   * tick - and because the status flips to "completed" by comparing that count
+   * to the total, a batch that undercounts even once never completes at all.
+   * Reside polls exactly that field, so the batch would sit in "processing"
+   * forever with every recipient already delivered.
+   */
+  it("counts every finisher when several land at once", async () => {
+    const tenant = await makeTenant("c1");
+    const batch = await batchOf(tenant.id, 10);
+
+    await Promise.all(
+      Array.from({ length: 10 }, () => domain.incrementOutboundBatchCompleted(batch.id)),
+    );
+
+    const done = await domain.getOutboundBatch(batch.id);
+    expect(done?.completedRecipients).toBe(10);
+    // And the status is derived from the value that was actually written.
+    expect(done?.status).toBe("completed");
+    expect(done?.completedAt).toBeTruthy();
+  });
+
+  it("stays in processing until the last recipient lands", async () => {
+    const tenant = await makeTenant("c2");
+    const batch = await batchOf(tenant.id, 3);
+
+    await domain.incrementOutboundBatchCompleted(batch.id);
+    await domain.incrementOutboundBatchCompleted(batch.id);
+    let mid = await domain.getOutboundBatch(batch.id);
+    expect(mid?.status).toBe("processing");
+    expect(mid?.completedAt).toBeNull();
+
+    await domain.incrementOutboundBatchCompleted(batch.id);
+    mid = await domain.getOutboundBatch(batch.id);
+    expect(mid?.status).toBe("completed");
+  });
+
+  /* An UPDATE matching nothing succeeds, so without the returning check the
+   * caller never learns the batch it is counting against does not exist. */
+  it("reports an unknown batch rather than succeeding silently", async () => {
+    await expect(
+      domain.incrementOutboundBatchCompleted("00000000-0000-0000-0000-000000000000"),
+    ).rejects.toThrow(/Unknown outbound batch/);
+  });
+});
