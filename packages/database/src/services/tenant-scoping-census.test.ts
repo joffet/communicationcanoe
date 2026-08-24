@@ -111,6 +111,12 @@ const CALLER_ENFORCED = [
   "markMessageTranscriptionFailed",
   "markTopicCheckReviewed",
   "recordChannelDeliveryOutcome",
+  // Same standing as markMessageOpened above, and for a stronger reason than
+  // most of this list: the caller is the click redirect, and what it holds is
+  // an HMAC token this service minted for that exact message id. Possession of
+  // a valid token IS proof of ownership - a tenantId parameter here would be
+  // taken from the same request and prove less.
+  "recordMessageClick",
   "removeConversationAssignee",
   "removeConversationParticipant",
   "removeConversationPersonalTag",
@@ -129,8 +135,8 @@ const CALLER_ENFORCED = [
 describe("tenant scoping census", () => {
   it("finds the service surface (sanity check that the parse works)", () => {
     const methods = publicMethods();
-    // All 96, including the seven with no return-type annotation.
-    expect(methods.length).toBe(96);
+    // All 97, including the seven with no return-type annotation.
+    expect(methods.length).toBe(97);
     expect(methods.map((m) => m.name)).toContain("getConversationsForTenant");
   });
 

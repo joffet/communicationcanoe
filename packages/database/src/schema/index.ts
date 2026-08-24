@@ -609,6 +609,15 @@ export const messages = pgTable(
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     /** 20250701000100 */
     openedAt: timestamp("opened_at", { withTimezone: true }),
+    /**
+     * First click on any tracked link in this message.
+     *
+     * "Has this recipient ever clicked", not "what did they click" - which
+     * link, and how many times, is reported to reside as it happens and kept
+     * there. This column exists so the batch view can answer the same
+     * question for clicks that opened_at answers for opens, without a join.
+     */
+    clickedAt: timestamp("clicked_at", { withTimezone: true }),
     /** 20250701000500 */
     visibility: messageVisibilityEnum("visibility")
       .notNull()

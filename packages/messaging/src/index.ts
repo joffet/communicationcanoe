@@ -8,5 +8,12 @@ export { sendTenantReplyEmail } from "./email/tenant-reply";
 export type { SendTenantReplyEmailOptions, SendTenantReplyEmailResult } from "./email/tenant-reply";
 export { createEmailOpenToken, verifyEmailOpenToken } from "./email/open-tracking-token";
 export type { EmailOpenTokenPayload } from "./email/open-tracking-token";
+export {
+  createEmailClickToken,
+  verifyEmailClickToken,
+  isRedirectableUrl,
+} from "./email/click-tracking-token";
+export type { EmailClickTokenPayload } from "./email/click-tracking-token";
+export { withClickTracking } from "./email/click-tracking";
 
 export { dispatchOutboundMessage } from "./dispatch-message";

@@ -1,0 +1,1 @@
+ALTER TABLE "messages" ADD COLUMN "clicked_at" timestamp with time zone;
