@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,9 +22,9 @@ function senderLabel(senderType: string) {
 
 export function InboxShell({
   tenantId,
-  conversations: initialConversations,
+  conversations,
   selectedId,
-  thread: initialThread,
+  thread,
   currentUserId,
 }: {
   tenantId: string;
@@ -34,8 +34,6 @@ export function InboxShell({
   currentUserId: string;
 }) {
   const router = useRouter();
-  const [conversations, setConversations] = useState(initialConversations);
-  const [thread, setThread] = useState(initialThread);
   const [draft, setDraft] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [suggestLoading, setSuggestLoading] = useState(false);
@@ -49,11 +47,6 @@ export function InboxShell({
   }, [router]);
 
   useConversationRealtime(tenantId, selectedId, refreshThread);
-
-  useEffect(() => {
-    setConversations(initialConversations);
-    setThread(initialThread);
-  }, [initialConversations, initialThread]);
 
   const isWebChat = thread?.messages.some((m) => m.channel === "web_chat");
   const isAssignedToMe = thread?.assignedUserId === currentUserId;
@@ -76,11 +69,10 @@ export function InboxShell({
     if (!selectedId) return;
     setSummaryLoading(true);
     try {
-      const res = await fetch(`/api/conversations/${selectedId}/summarize`, { method: "POST" });
-      const data = (await res.json()) as { summary?: string };
-      if (data.summary) {
-        setThread((prev) => (prev ? { ...prev, summary: data.summary ?? null } : prev));
-      }
+      // The route persists the summary before responding, so the refresh is
+      // what puts it on screen - same path joinChat and sendMessage take.
+      await fetch(`/api/conversations/${selectedId}/summarize`, { method: "POST" });
+      router.refresh();
     } finally {
       setSummaryLoading(false);
     }
