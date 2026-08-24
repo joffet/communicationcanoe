@@ -424,12 +424,30 @@ export const identities = pgTable(
       sql`${t.mergedIntoId} is distinct from ${t.id}`,
     ),
     index("identities_tenant_idx").on(t.tenantId),
+    /**
+     * One CANONICAL identity per contact, not one row per contact.
+     *
+     * These were partial on `is not null` alone, which is a stricter rule than
+     * the code can keep. A merge sets `merged_into_id` on the losing row and
+     * leaves its phone and email intact - deliberately, so the merge log has
+     * something to point at - and then copies the contact onto the survivor.
+     * Two rows, same email, and the write that copied it violated the index.
+     * That is not a race: a contact carrying a phone matching one identity and
+     * an email matching another crashes findOrCreateIdentity single-threaded,
+     * which is the ordinary shape for somebody who has both texted and emailed
+     * the building.
+     *
+     * `merged_into_id is null` is the same filter findIdentityByPhone and
+     * findIdentityByEmail already apply, so the index now expresses the
+     * invariant the finders actually rely on - and a merged row keeps its
+     * history without colliding with the row that absorbed it.
+     */
     uniqueIndex("identities_tenant_phone_unique")
       .on(t.tenantId, t.phone)
-      .where(sql`${t.phone} is not null`),
+      .where(sql`${t.phone} is not null and ${t.mergedIntoId} is null`),
     uniqueIndex("identities_tenant_email_unique")
       .on(t.tenantId, t.email)
-      .where(sql`${t.email} is not null`),
+      .where(sql`${t.email} is not null and ${t.mergedIntoId} is null`),
     index("identities_merged_into_idx")
       .on(t.mergedIntoId)
       .where(sql`${t.mergedIntoId} is not null`),
