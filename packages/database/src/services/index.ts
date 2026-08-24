@@ -873,28 +873,35 @@ export class DomainService {
 
   /** Called once per drained recipient; marks the batch completed once every
    * recipient has been processed. */
+  /**
+   * Counts one recipient done, in the database rather than in this process.
+   *
+   * Was a read-then-write, which is correct only while the drain is serial.
+   * Two workers finishing at once both read the same count and both write it
+   * plus one, so the batch loses a tick - and because `status` flips to
+   * "completed" by comparing that count to the total, a batch that undercounts
+   * even once never completes at all. Reside polls exactly that field.
+   *
+   * The increment and the comparison are one statement now, so the value the
+   * status is derived from is the value that was written.
+   */
   async incrementOutboundBatchCompleted(batchId: string): Promise<void> {
-    const [batch] = await this.orm
-      .select({
-        completedRecipients: outboundBatches.completedRecipients,
-        totalRecipients: outboundBatches.totalRecipients,
-      })
-      .from(outboundBatches)
-      .where(eq(outboundBatches.id, batchId))
-      .limit(1);
-    if (!batch) throw new Error(`Unknown outbound batch: ${batchId}`);
+    const completed = sql`${outboundBatches.completedRecipients} + 1`;
+    const isDone = sql`${completed} >= ${outboundBatches.totalRecipients}`;
 
-    const completed = batch.completedRecipients + 1;
-    const isDone = completed >= batch.totalRecipients;
-
-    await this.orm
+    const [updated] = await this.orm
       .update(outboundBatches)
       .set({
         completedRecipients: completed,
-        status: isDone ? "completed" : "processing",
-        completedAt: isDone ? new Date() : null,
+        status: sql`case when ${isDone} then 'completed' else 'processing' end`,
+        completedAt: sql`case when ${isDone} then now() else null end`,
       })
-      .where(eq(outboundBatches.id, batchId));
+      .where(eq(outboundBatches.id, batchId))
+      .returning({ id: outboundBatches.id });
+
+    // An UPDATE matching nothing succeeds, so the caller would otherwise never
+    // learn that the batch it is counting against does not exist.
+    if (!updated) throw new Error(`Unknown outbound batch: ${batchId}`);
   }
 
   /** Composed read for reside's Notice detail page - batch + every recipient's
