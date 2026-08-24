@@ -1,5 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import type { TenantId } from "@communication-canoe/shared/brands";
+import { createSignedToken, verifySignedToken } from "./signed-token";
 
 export type ChatSessionPayload = {
   tenantId: TenantId;
@@ -16,49 +16,15 @@ function getSecret(): string {
   return secret;
 }
 
-function encodePayload(payload: ChatSessionPayload): string {
-  return Buffer.from(JSON.stringify(payload)).toString("base64url");
-}
-
-function decodePayload(encoded: string): ChatSessionPayload | null {
-  try {
-    const json = Buffer.from(encoded, "base64url").toString("utf8");
-    return JSON.parse(json) as ChatSessionPayload;
-  } catch {
-    return null;
-  }
-}
-
-function sign(encoded: string): string {
-  return createHmac("sha256", getSecret()).update(encoded).digest("base64url");
-}
-
 export function createChatSessionToken(
   payload: Omit<ChatSessionPayload, "exp">,
   ttlMs = Number(process.env.CHAT_SESSION_TTL_MS ?? 604_800_000),
 ): string {
-  const full: ChatSessionPayload = {
-    ...payload,
-    exp: Date.now() + ttlMs,
-  };
-  const encoded = encodePayload(full);
-  return `${encoded}.${sign(encoded)}`;
+  return createSignedToken(payload, getSecret(), ttlMs);
 }
 
 export function verifyChatSessionToken(token: string): ChatSessionPayload | null {
-  const [encoded, signature] = token.split(".");
-  if (!encoded || !signature) return null;
-
-  const expected = sign(encoded);
-  const sigBuf = Buffer.from(signature);
-  const expBuf = Buffer.from(expected);
-  if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
-    return null;
-  }
-
-  const payload = decodePayload(encoded);
-  if (!payload || payload.exp < Date.now()) return null;
-  return payload;
+  return verifySignedToken<ChatSessionPayload>(token, getSecret());
 }
 
 export function generateWidgetKey(): string {

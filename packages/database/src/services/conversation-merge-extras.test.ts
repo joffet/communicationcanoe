@@ -1,7 +1,6 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { DomainService } from "./index";
-import type { AppSupabaseClient } from "../client";
 import { createTestDb, resetTestDb, type TestDb } from "../testing/pglite";
 import {
   conversationAssignees,
@@ -33,7 +32,7 @@ function moveExtras(sourceId: string, targetId: string): Promise<void> {
 
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
-  domain = new DomainService(null as unknown as AppSupabaseClient, db);
+  domain = new DomainService(db);
 }, 60_000);
 
 afterAll(async () => {

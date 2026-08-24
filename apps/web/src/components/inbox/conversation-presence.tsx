@@ -1,43 +1,44 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { authClient } from "@/lib/auth/client";
-import { createRealtimeClient } from "@/lib/supabase/realtime";
+import type { DashboardViewer } from "@communication-canoe/shared/realtime";
+import { subscribeToDashboard } from "@/lib/realtime/dashboard-socket";
 import { Avatar } from "@/components/ui/avatar";
 
-type PresenceUser = { userId: string; name: string };
-
-export function ConversationPresence({ conversationId }: { conversationId: string }) {
-  const { data: session } = authClient.useSession();
-  const [viewers, setViewers] = useState<PresenceUser[]>([]);
+/**
+ * Who else has this conversation open.
+ *
+ * Listens only - the bridge learns this agent is viewing from the `watch` that
+ * useConversationRealtime already sends for the same conversation, and derives
+ * every viewer's identity from the token on the socket rather than from
+ * anything the browser claims. The list arrives excluding this agent.
+ */
+export function ConversationPresence({
+  tenantId,
+  conversationId,
+}: {
+  tenantId: string;
+  conversationId: string;
+}) {
+  // Kept with the conversation it describes rather than reset when that
+  // changes: a viewer list for the conversation just closed is simply not this
+  // conversation's list, and comparing on render says so without a second
+  // state update chasing the first.
+  const [latest, setLatest] = useState<{
+    conversationId: string;
+    viewers: DashboardViewer[];
+  } | null>(null);
 
   useEffect(() => {
-    const userId = session?.user?.id;
-    if (!userId) return;
-
-    const displayName = session.user.name ?? session.user.email?.split("@")[0] ?? "Agent";
-    const supabase = createRealtimeClient();
-
-    const channel = supabase.channel(`presence:conversation:${conversationId}`, {
-      config: { presence: { key: userId } },
+    const { unsubscribe } = subscribeToDashboard(tenantId, (event) => {
+      if (event.type !== "viewers") return;
+      setLatest({ conversationId: event.conversationId, viewers: event.viewers });
     });
 
-    channel
-      .on("presence", { event: "sync" }, () => {
-        const state = channel.presenceState<PresenceUser>();
-        const all = Object.values(state).flat();
-        setViewers(all.filter((v) => v.userId !== userId));
-      })
-      .subscribe(async (status) => {
-        if (status === "SUBSCRIBED") {
-          await channel.track({ userId, name: displayName });
-        }
-      });
+    return unsubscribe;
+  }, [tenantId]);
 
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [conversationId, session?.user?.email, session?.user?.id, session?.user?.name]);
+  const viewers = latest?.conversationId === conversationId ? latest.viewers : [];
 
   if (viewers.length === 0) return null;
 

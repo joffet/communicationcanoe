@@ -48,7 +48,7 @@ export function InboxShell({
     router.refresh();
   }, [router]);
 
-  useConversationRealtime(selectedId, refreshThread);
+  useConversationRealtime(tenantId, selectedId, refreshThread);
 
   useEffect(() => {
     setConversations(initialConversations);
@@ -194,7 +194,7 @@ export function InboxShell({
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <ConversationPresence conversationId={thread.id} />
+                <ConversationPresence tenantId={tenantId} conversationId={thread.id} />
                 {isWebChat && needsHumanNow && !isAssignedToMe && (
                   <Button size="sm" onClick={joinChat} disabled={joining}>
                     {joining ? "Joining…" : "Join chat"}

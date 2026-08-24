@@ -21,32 +21,56 @@ export type ChatWidgetServerMessage =
   | { type: "error"; code: string; message?: string };
 
 /**
- * Dashboard broadcast payloads.
+ * Dashboard socket protocol.
  *
- * These go out on Supabase Realtime channels that any holder of the public
- * anon key can subscribe to - they are not private channels, and the
- * authorization data that would gate them (conversations, memberships) lives
- * in PlanetScale where a Supabase RLS policy cannot reach it. So the rule
- * here is that a payload carries an identifier or nothing, never content:
- * whatever a subscriber learns must be no more than "something happened".
+ * The dashboard opens one authenticated WebSocket to the realtime bridge
+ * (`/dashboard`) and does three things over it: hears about tenant-wide
+ * escalations, hears that the conversation it currently has open changed, and
+ * announces itself as a viewer of that conversation. Presence and change
+ * notification share the socket because they share a subject - the client
+ * sends one `watch` naming the open conversation, and both follow from it.
  *
- * That costs nothing, because the dashboard never read the content anyway.
- * Every listener in chat-realtime.tsx calls router.refresh() and drops the
- * payload on the floor; the conversation is then refetched through the
- * authenticated, tenant-scoped server route, which is the only path that was
- * ever load-bearing. The visitor's own copy of a message does not come from
- * here either - chat-session.ts sends it down their WebSocket directly.
+ * The socket is authenticated before it carries anything: the client's first
+ * frame is `auth` with a short-lived token minted by the web app from the
+ * caller's Better Auth session (`/api/realtime/token`), and the bridge scopes
+ * everything after it to the tenant in that token. That is what lets `viewers`
+ * carry agent names - the identity comes from the token, not from the client,
+ * and only members of the tenant ever see it.
+ *
+ * Change notifications stay content-free anyway, for a different reason than
+ * the old public-channel rule: the dashboard never read the content. Every
+ * `conversation` frame lands in a `router.refresh()`, and the conversation is
+ * refetched through the authenticated, tenant-scoped server route, which is
+ * the only path that was ever load-bearing. The visitor's own copy of a
+ * message does not come from here either - chat-session.ts sends it down
+ * their WebSocket directly.
  */
-export type ChatBroadcastNeedsHuman = {
-  /** The only field any subscriber reads (useNeedsHumanConversations). */
-  conversationId: string;
-};
+export type DashboardClientMessage =
+  /** Always the first frame; anything before it is refused. */
+  | { type: "auth"; token: string }
+  /** The conversation this client has open, or null when none is. */
+  | { type: "watch"; conversationId: string | null };
 
-/** Signal only - see the note above. `handoff_state` names what changed. */
-export type ChatBroadcastHandoffState = Record<string, never>;
+export type DashboardViewer = { userId: string; name: string };
 
-/** Signal only - see the note above. `message` names what changed. */
-export type ChatBroadcastMessage = Record<string, never>;
+/** What changed about a conversation. `updated` is the structural one -
+ * emitted by DomainService.splitConversation/mergeConversations for a
+ * conversation of any channel, where `message` is web_chat-shaped and comes
+ * from the live chat session. */
+export type DashboardConversationEvent = "message" | "handoff_state" | "updated";
+
+export type DashboardServerMessage =
+  | { type: "ready" }
+  | { type: "needs_human"; conversationId: string }
+  | {
+      type: "conversation";
+      conversationId: string;
+      event: DashboardConversationEvent;
+    }
+  /** Everyone watching `conversationId` except the recipient, deduped by
+   * user, re-sent to every watcher whenever the set changes. */
+  | { type: "viewers"; conversationId: string; viewers: DashboardViewer[] }
+  | { type: "error"; code: string };
 
 export type HandoffJoinRequest = {
   conversationId: string;

@@ -20,6 +20,8 @@ import { readFileSync, existsSync } from "node:fs";
 import { WebSocketServer } from "ws";
 import { loadConfig } from "./config.js";
 import { handleChatConnection, handleAgentMessage, handleHandoffJoin } from "./routes/chat-widget.js";
+import { handleDashboardConnection } from "./routes/dashboard.js";
+import { dashboardHub } from "./realtime/dashboard-hub.js";
 import { handleTwilioStreamConnection } from "./routes/twilio-stream.js";
 import { startOutboundBatchWorker } from "./workers/outbound-batch-worker.js";
 import { startScheduledMessageWorker } from "./workers/scheduled-message-worker.js";
@@ -72,6 +74,23 @@ const server = createServer((req, res) => {
     return;
   }
 
+  // Conversation changes made outside this process - a merge or split run
+  // from the web app, or from one of this service's own workers - reaching the
+  // dashboard sockets, which only live here. See
+  // packages/database/src/realtime/notify.ts.
+  if (url === "/internal/broadcast" && req.method === "POST") {
+    void handleInternal(req, res, config.internalSecret, (body) => {
+      const { conversationId, event } = body as {
+        conversationId?: string;
+        event?: "message" | "handoff_state" | "updated";
+      };
+      if (!conversationId || !event) return { ok: false };
+      dashboardHub.emitConversation(conversationId, event);
+      return { ok: true };
+    });
+    return;
+  }
+
   res.writeHead(404, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ error: "Not found" }));
 });
@@ -91,6 +110,11 @@ wss.on("connection", (ws, request) => {
     return;
   }
 
+  if (path === "/dashboard" || path.startsWith("/dashboard?")) {
+    handleDashboardConnection(ws);
+    return;
+  }
+
   ws.close();
 });
 
@@ -101,7 +125,9 @@ server.on("upgrade", (request, socket, head) => {
     path === "/chat" ||
     path.startsWith("/chat?") ||
     path === "/stream" ||
-    path.startsWith("/stream?")
+    path.startsWith("/stream?") ||
+    path === "/dashboard" ||
+    path.startsWith("/dashboard?")
   ) {
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit("connection", ws, request);

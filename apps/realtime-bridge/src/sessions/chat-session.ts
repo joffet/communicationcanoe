@@ -82,7 +82,7 @@ export class ChatSession {
         });
 
         this.send({ type: "message", text: body, senderType: "ai_agent" });
-        await broadcastChatMessage(this.conversationId);
+        broadcastChatMessage(this.conversationId);
       },
       onToolCall: (name, args, callId) => {
         void this.handleToolCall(name, args, callId);
@@ -150,7 +150,7 @@ export class ChatSession {
         // Came directly from the visitor.
         visibility: "external",
       });
-      await broadcastChatMessage(this.conversationId);
+      broadcastChatMessage(this.conversationId);
       return;
     }
 
@@ -194,14 +194,14 @@ export class ChatSession {
 
     // No `reason` here - see the payload note in protocol.ts. The dashboard
     // reads it from the tenant-scoped conversation route instead.
-    await broadcastNeedsHuman(this.tenantId, { conversationId: this.conversationId });
+    broadcastNeedsHuman(this.tenantId, this.conversationId);
 
     this.send({
       type: "handoff",
       state: "waiting",
       message: "Connecting you to a team member…",
     });
-    await broadcastHandoffState(this.conversationId);
+    broadcastHandoffState(this.conversationId);
 
     this.handoffTimer = setTimeout(() => {
       void this.handleHandoffTimeout();
@@ -233,7 +233,7 @@ export class ChatSession {
       state: "human",
       message: `${agentName ?? "A team member"} has joined the chat.`,
     });
-    await broadcastHandoffState(this.conversationId);
+    broadcastHandoffState(this.conversationId);
   }
 
   relayAgentMessage(body: string) {
@@ -263,7 +263,7 @@ export class ChatSession {
       senderType: "internal_user",
     });
 
-    await broadcastChatMessage(this.conversationId);
+    broadcastChatMessage(this.conversationId);
     void agentName;
   }
 
@@ -280,7 +280,7 @@ export class ChatSession {
       state: "ai",
       message: "No one is available right now. I can help you leave a message.",
     });
-    await broadcastHandoffState(this.conversationId);
+    broadcastHandoffState(this.conversationId);
 
     await this.start();
     this.realtime?.sendUserText(
