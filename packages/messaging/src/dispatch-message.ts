@@ -2,6 +2,7 @@ import { createDomainService } from "@communication-canoe/database";
 import type { Message, Tenant } from "@communication-canoe/database";
 import { sendSms } from "./sms/send";
 import { sendTenantReplyEmail } from "./email/tenant-reply";
+import { resolveMailFrom } from "./email/from";
 import { createEmailOpenToken } from "./email/open-tracking-token";
 
 function withOpenTrackingPixel(html: string, messageId: string): string {
@@ -76,6 +77,16 @@ export async function dispatchOutboundMessage(params: {
         text: html,
         tenant,
         from,
+        // Whatever the From would have been without the override - the
+        // tenant's inbound address. The override is a send-only identity, so
+        // without this a resident who hits Reply is writing into a void;
+        // with it the reply lands in the same mailbox, and threads into the
+        // same conversation, as it did before overrides existed.
+        //
+        // Derived here rather than sent by reside because this side owns the
+        // address: reside's copy of it is a cache that drifts if the value is
+        // edited in comm-canoe.
+        replyTo: from ? resolveMailFrom(tenant) : undefined,
         // Reside always sends its rendered HTML (notification templates,
         // notice bodies) as `body` - never plain text needing escaping.
         isHtml: true,

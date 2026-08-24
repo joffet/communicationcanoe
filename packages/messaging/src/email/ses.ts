@@ -28,6 +28,7 @@ export async function sendSesEmail(options: {
   html: string;
   text?: string;
   from?: string;
+  replyTo?: string;
   tenant?: TenantMailFrom | null;
   configurationSetName?: string;
 }): Promise<{ messageId?: string }> {
@@ -38,6 +39,7 @@ export async function sendSesEmail(options: {
     new SendEmailCommand({
       Source: from,
       Destination: { ToAddresses: [options.to] },
+      ...(options.replyTo ? { ReplyToAddresses: [options.replyTo] } : {}),
       Message: {
         Subject: { Data: options.subject, Charset: "UTF-8" },
         Body: {
