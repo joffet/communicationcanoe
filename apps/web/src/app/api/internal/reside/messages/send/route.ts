@@ -23,6 +23,7 @@ export async function POST(request: Request) {
     subject,
     conversationId,
     idempotencyKey,
+    from,
   } = parsed.data;
 
   const to = channel === "sms" ? identity.phone : identity.email;
@@ -92,7 +93,7 @@ export async function POST(request: Request) {
     visibility: "external",
   });
 
-  const sent = await dispatchOutboundMessage({ tenant, message, to });
+  const sent = await dispatchOutboundMessage({ tenant, message, to, from });
 
   return Response.json({
     message: {
