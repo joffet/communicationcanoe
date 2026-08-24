@@ -15,7 +15,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createUserAction, updateUserAction } from "./actions";
-import { asTenantId } from "@communication-canoe/database";
+// From shared/brands, not the database package that re-exports it: this is a
+// client component, and that package's barrel reaches db.ts, which imports pg.
+// A value import here pulls the Postgres driver into the browser bundle and
+// the build fails on `dns`/`net`/`tls`. Type-only imports are erased and safe;
+// value imports are not.
+import { asTenantId } from "@communication-canoe/shared/brands";
 
 type UserFormProps = {
   user?: AdminUser | null;
