@@ -146,3 +146,56 @@ describe("findOrCreateAnonymousIdentity", () => {
     expect(converted.email).toBe("now@example.test");
   });
 });
+
+describe("findOrCreateIdentity under the unique indexes", () => {
+  /**
+   * The merge branch writes the merged-away row's email onto the survivor
+   * while the merged row keeps its own copy - and identities_tenant_email_unique
+   * is partial on `email is not null`, not on "canonical", so both rows are in
+   * it and the second write violates it.
+   *
+   * Reachable whenever a contact arrives carrying a phone that matches one
+   * identity and an email that matches a different one, which is the ordinary
+   * shape for somebody who has texted the building and also emailed it.
+   */
+  it("survives a contact whose phone and email match two different identities", async () => {
+    const tenant = await makeTenant("m");
+
+    // Texted the building: phone only.
+    await domain.findOrCreateIdentity(tenant.id, { phone: "+15550000001" });
+    // Emailed the building: email only.
+    await domain.findOrCreateIdentity(tenant.id, { email: "same@example.test" });
+
+    // Now reside sends them a notice carrying both - the merge branch.
+    const merged = await domain.findOrCreateIdentity(tenant.id, {
+      phone: "+15550000001",
+      email: "same@example.test",
+    });
+
+    expect(merged.phone).toBe("+15550000001");
+    expect(merged.email).toBe("same@example.test");
+
+    // And it stays resolvable afterwards.
+    const again = await domain.findOrCreateIdentity(tenant.id, { email: "same@example.test" });
+    expect(again.id).toBe(merged.id);
+  });
+
+  /**
+   * Two sends for the same person landing at once - which is what
+   * parallelising the outbound batch worker produces. Both find nothing, both
+   * insert, and the unique index means one of them loses.
+   *
+   * The index is doing its job: the data cannot be corrupted. The question is
+   * whether the loser crashes or reads back the winner's row.
+   */
+  it("returns the winner's identity when two creates race", async () => {
+    const tenant = await makeTenant("r");
+
+    const [a, b] = await Promise.all([
+      domain.findOrCreateIdentity(tenant.id, { email: "race@example.test" }),
+      domain.findOrCreateIdentity(tenant.id, { email: "race@example.test" }),
+    ]);
+
+    expect(a.id).toBe(b.id);
+  });
+});

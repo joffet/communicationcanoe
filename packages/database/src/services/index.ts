@@ -364,6 +364,17 @@ export class DomainService {
       return this.getCanonicalIdentity(existing.id);
     }
 
+    // onConflictDoNothing, then read back what won.
+    //
+    // Two sends for the same person landing at once - which is exactly what
+    // parallelising the outbound batch worker produces - both find nothing
+    // above and both insert. The unique indexes mean the data cannot be
+    // corrupted either way; without this the loser threw a 23505 at a caller
+    // that was only trying to look somebody up.
+    //
+    // No conflict target: the row can collide on phone, on email, or on
+    // resideResidentId, and naming one of them would leave the other two
+    // throwing.
     const [created] = await this.orm
       .insert(identities)
       .values({
@@ -373,9 +384,25 @@ export class DomainService {
         name: contact.name ?? null,
         resideResidentId: contact.resideResidentId ?? null,
       })
+      .onConflictDoNothing()
       .returning();
-    const data = created;
-    return data;
+    if (created) return created;
+
+    // Lost the race. Whoever won inserted a row matching this contact, so the
+    // same lookups that found nothing a moment ago find it now.
+    const winner =
+      (phone ? await this.findIdentityByPhone(tenantId, phone) : null) ??
+      (email ? await this.findIdentityByEmail(tenantId, email) : null);
+    if (winner) return this.getCanonicalIdentity(winner.id);
+
+    // Nothing inserted and nothing found. A conflict on a column neither
+    // lookup covers - resideResidentId - is the only way here, and it means
+    // this contact's reside id is already held by an identity carrying
+    // different contact details. Worth failing loudly rather than inventing
+    // an identity to return.
+    throw new Error(
+      `findOrCreateIdentity: insert conflicted but no matching identity found (tenant ${tenantId})`,
+    );
   }
 
   /**
