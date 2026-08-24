@@ -1,0 +1,11 @@
+-- DO NOT REGENERATE WITHOUT RE-ADDING THE GUARD.
+--
+-- drizzle-kit emits a bare ADD COLUMN here. This column is already live in
+-- production: it was applied on 2026-08-24 from a branch that was then
+-- reverted, leaving the column with no migration file behind it. A bare ADD
+-- COLUMN fails on apply with "column already exists"; IF NOT EXISTS makes this
+-- a no-op there and a real create everywhere else, and closes the ledger gap
+-- the revert left (5 rows against 4 files).
+--
+-- The live column is `text`, nullable - the same shape this creates.
+ALTER TABLE "outbound_batches" ADD COLUMN IF NOT EXISTS "from_address" text;

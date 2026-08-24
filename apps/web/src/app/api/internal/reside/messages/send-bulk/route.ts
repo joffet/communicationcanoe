@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { tenantId: resideClientUid, channel, body, subject, recipients } = parsed.data;
+  const { tenantId: resideClientUid, channel, body, subject, recipients, from } = parsed.data;
 
   const admin = createAdminService();
   const tenant = await admin.getTenantByResideClientUid(resideClientUid);
@@ -28,6 +28,7 @@ export async function POST(request: Request) {
     subject,
     body,
     recipients,
+    from,
   });
 
   return Response.json({ batchId: batch.id, totalRecipients: batch.totalRecipients });

@@ -169,3 +169,40 @@ describe("incrementOutboundBatchCompleted", () => {
     ).rejects.toThrow(/Unknown outbound batch/);
   });
 });
+
+describe("createOutboundBatch's From", () => {
+  /* One notice, one building, one sending identity. Stored on the batch rather
+   * than the recipient so a drain cannot send half a notice from one address
+   * and half from another. */
+  it("stores the From on the batch when reside supplies one", async () => {
+    const tenant = await makeTenant("f1");
+    const batch = await domain.createOutboundBatch({
+      tenantId: tenant.id,
+      channel: "email",
+      subject: "Water shut-off",
+      body: "<p>Tuesday</p>",
+      recipients: [{ email: "a@example.test" }],
+      from: '"One Cardiff Notify" <info@onecardiff.ca>',
+    });
+
+    expect((await domain.getOutboundBatch(batch.id))?.fromAddress).toBe(
+      '"One Cardiff Notify" <info@onecardiff.ca>',
+    );
+  });
+
+  /* Absent keeps the tenant's inbound reply address, which is what every bulk
+   * send did before this existed - a caller that does not ask must not be
+   * silently given a different sender. */
+  it("leaves the From null when none is supplied", async () => {
+    const tenant = await makeTenant("f2");
+    const batch = await domain.createOutboundBatch({
+      tenantId: tenant.id,
+      channel: "email",
+      subject: "Water shut-off",
+      body: "<p>Tuesday</p>",
+      recipients: [{ email: "a@example.test" }],
+    });
+
+    expect((await domain.getOutboundBatch(batch.id))?.fromAddress).toBeNull();
+  });
+});
