@@ -4,6 +4,7 @@ import { sendSms } from "./sms/send";
 import { sendTenantReplyEmail } from "./email/tenant-reply";
 import { resolveMailFrom } from "./email/from";
 import { createEmailOpenToken } from "./email/open-tracking-token";
+import { withClickTracking } from "./email/click-tracking";
 
 function withOpenTrackingPixel(html: string, messageId: string): string {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
@@ -71,6 +72,12 @@ export async function dispatchOutboundMessage(params: {
       if (message.senderType === "internal_user") {
         html = withMemberPortalLink(html, message.conversationId, tenant);
       }
+      // Last, so the portal link above is tracked too, and so the pixel that
+      // withOpenTrackingPixel just appended is left alone - it is an <img>,
+      // and the rewriter only touches anchors. Same per-message identity the
+      // pixel uses: message.id is this recipient's own row, which is what
+      // makes a click attributable to a person rather than to a batch.
+      html = withClickTracking(html, message.id);
       const result = await sendTenantReplyEmail({
         to,
         subject: message.subject ?? "",

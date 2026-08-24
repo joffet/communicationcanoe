@@ -47,10 +47,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ batc
     completedRecipients: detail.batch.completedRecipients,
     recipients: detail.recipients.map((r) => ({
       identity: r.identityContact,
+      // comm-canoe's own per-recipient message id. Reside stores it against
+      // its receipt so the click webhook - which knows only this id - can be
+      // matched back to a person. Without it reside can match a batch poll by
+      // address, but has nothing to join an out-of-band click callback on.
+      messageId: r.messageId,
       status: r.status,
       deliveryStatus: r.deliveryStatus,
       deliveryError: r.deliveryError,
       openedAt: r.openedAt,
+      clickedAt: r.clickedAt,
     })),
   });
 }

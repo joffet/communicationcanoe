@@ -890,6 +890,7 @@ export class DomainService {
         deliveryStatus: MessageDeliveryStatus | null;
         deliveryError: string | null;
         openedAt: Date | null;
+        clickedAt: Date | null;
       }
     >;
   } | null> {
@@ -917,6 +918,7 @@ export class DomainService {
           deliveryStatus: message?.deliveryStatus ?? null,
           deliveryError: message?.deliveryError ?? null,
           openedAt: message?.openedAt ?? null,
+          clickedAt: message?.clickedAt ?? null,
         };
       }),
     };
@@ -931,6 +933,27 @@ export class DomainService {
    * pixel every time the message is displayed, so "an open happened" fires
    * repeatedly while "the first open happened" fires once.
    */
+  /**
+   * Records that a tracked link in this message was followed.
+   *
+   * Reports whether this was the first click, which callers use the way
+   * markMessageOpened's firstOpen is used - except in the opposite direction.
+   * An open is notified only on the first, because an image proxy re-fetches
+   * a cached pixel every time the message is displayed. A click is notified
+   * every time, because each one is a person choosing to go somewhere and a
+   * notice with two buttons wants to know which got pressed. `firstClick` is
+   * therefore reported for the record, not to gate the notification.
+   */
+  async recordMessageClick(messageId: string): Promise<{ firstClick: boolean }> {
+    const updated = await this.orm
+      .update(messages)
+      .set({ clickedAt: new Date() })
+      .where(and(eq(messages.id, messageId), isNull(messages.clickedAt)))
+      .returning({ id: messages.id });
+
+    return { firstClick: updated.length > 0 };
+  }
+
   async markMessageOpened(messageId: string): Promise<{ firstOpen: boolean }> {
     const updated = await this.orm
       .update(messages)
