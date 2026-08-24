@@ -45,9 +45,14 @@ export async function dispatchOutboundMessage(params: {
   tenant: Tenant;
   message: Message;
   to: string;
+  /** Per-send From override for email - reside's building sending identity.
+   * Not persisted on the message row: reside re-derives it on every retry so
+   * a replay carries the building's current address, not the one configured
+   * when the first attempt failed. */
+  from?: string;
 }): Promise<Message> {
   const domain = createDomainService();
-  const { tenant, message, to } = params;
+  const { tenant, message, to, from } = params;
 
   try {
     if (message.channel === "sms") {
@@ -70,6 +75,7 @@ export async function dispatchOutboundMessage(params: {
         subject: message.subject ?? "",
         text: html,
         tenant,
+        from,
         // Reside always sends its rendered HTML (notification templates,
         // notice bodies) as `body` - never plain text needing escaping.
         isHtml: true,

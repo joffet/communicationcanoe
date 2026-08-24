@@ -126,6 +126,14 @@ export const resideSendMessageInputSchema = z
      * it untouched instead of sending again - this is what makes reside's
      * durable retry safe after a lost/timed-out response. */
     idempotencyKey: z.string().min(1).max(200).optional(),
+    /** Overrides the tenant's From header for this one email.
+     *
+     * reside sends its building's own outbound-only sending identity here
+     * ("One Cardiff Notify" <info@onecardiff.ca>), configured per building on
+     * its notification settings page. Absent - and for every non-reside path -
+     * the From stays the tenant's inbound reply address, which is what every
+     * send used before. Ignored for SMS. */
+    from: z.string().min(3).max(320).optional(),
   })
   .refine((data) => Boolean(data.identity.phone || data.identity.email), {
     message: "identity requires at least one of phone or email",
