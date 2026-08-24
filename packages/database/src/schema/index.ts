@@ -751,6 +751,12 @@ export const outboundBatches = pgTable("outbound_batches", {
     .references(() => tenants.id, { onDelete: "cascade" }),
   channel: messageChannelEnum("channel").notNull(),
   subject: text("subject"),
+  /** The From header every email in this batch goes out with, when the caller
+   * supplied one - reside's building sending identity. On the batch rather
+   * than the recipient because a bulk send is one notice from one building,
+   * and a per-recipient From is a way to get them out of step. Null keeps the
+   * tenant's inbound reply address, which is what every batch did before. */
+  fromAddress: text("from_address"),
   status: text("status")
     .notNull()
     .default("pending"),

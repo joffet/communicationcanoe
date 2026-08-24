@@ -151,6 +151,15 @@ export const resideSendBulkMessageInputSchema = z
     body: z.string().min(1),
     subject: z.string().optional(),
     recipients: z.array(identityContactBaseSchema).min(1).max(2000),
+    /** Overrides the tenant's From header for every email in this batch.
+     *
+     * Same value and the same reasoning as the single-send `from` above -
+     * reside's building sending identity - but one per batch rather than one
+     * per message: a bulk send is one notice from one building, so a per
+     * recipient From would be a way to get them out of step. Absent, the From
+     * stays the tenant's inbound reply address, which is what every bulk send
+     * did before. Ignored for SMS. */
+    from: z.string().min(3).max(320).optional(),
   })
   .refine((data) => data.recipients.every((r) => Boolean(r.phone || r.email)), {
     message: "every recipient requires at least one of phone or email",

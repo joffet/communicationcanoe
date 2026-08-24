@@ -1,0 +1,1 @@
+ALTER TABLE "outbound_batches" ADD COLUMN "from_address" text;

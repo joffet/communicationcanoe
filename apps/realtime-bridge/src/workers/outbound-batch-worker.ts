@@ -205,7 +205,15 @@ async function processRecipient(
       visibility: "external",
     });
 
-    const sent = await dispatchOutboundMessage({ tenant, message, to });
+    // The batch's From, when reside supplied one. Read from the batch rather
+    // than the recipient for the same reason it is stored there: one notice,
+    // one building, one sending identity.
+    const sent = await dispatchOutboundMessage({
+      tenant,
+      message,
+      to,
+      from: batch?.fromAddress ?? undefined,
+    });
 
     await domain.updateOutboundBatchRecipientStatus(recipient.id, {
       status: sent.deliveryStatus === "failed" ? "failed" : "sent",
