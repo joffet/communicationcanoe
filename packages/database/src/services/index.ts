@@ -753,6 +753,8 @@ export class DomainService {
     subject?: string;
     body: string;
     recipients: IdentityContact[];
+    /** Overrides the tenant's From for every email in this batch. */
+    from?: string;
   }): Promise<OutboundBatch> {
     // One transaction: a batch row claiming N recipients, with no recipient
     // rows behind it, would leave the worker reporting a batch that can never
@@ -764,6 +766,7 @@ export class DomainService {
           tenantId: input.tenantId,
           channel: input.channel,
           subject: input.subject ?? null,
+          fromAddress: input.from ?? null,
           totalRecipients: input.recipients.length,
         })
         .returning();
