@@ -29,13 +29,13 @@ declare global {
   type ConversationThread = import("@communication-canoe/database").ConversationThread;
 
   // @communication-canoe/database — client & services
-  type AppSupabaseClient = import("@communication-canoe/database").AppSupabaseClient;
   type AdminTenant = import("@communication-canoe/database").AdminTenant;
   type AdminUser = import("@communication-canoe/database").AdminUser;
   type AdminUserMembershipSummary =
     import("@communication-canoe/database").AdminUserMembershipSummary;
   type UserMembershipInput = import("@communication-canoe/database").UserMembershipInput;
   type ChatSessionPayload = import("@communication-canoe/database").ChatSessionPayload;
+  type DashboardTokenPayload = import("@communication-canoe/database").DashboardTokenPayload;
 
   // @communication-canoe/shared — constants
   type ConversationStatus = import("@communication-canoe/shared/constants").ConversationStatus;
@@ -91,9 +91,6 @@ declare global {
 
   namespace NodeJS {
     interface ProcessEnv {
-      NEXT_PUBLIC_SUPABASE_URL: string;
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: string;
-      SUPABASE_SERVICE_ROLE_KEY: string;
       DATABASE_URL: string;
       BETTER_AUTH_SECRET: string;
       BETTER_AUTH_URL: string;

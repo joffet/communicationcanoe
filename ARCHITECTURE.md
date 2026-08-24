@@ -2,12 +2,13 @@
 
 Multi-tenant service for managing customer enquiries across voice, SMS, email, and embeddable web chat, with AI-assisted routing, summarization, and a real-time conversational AI capable of live transfer to a human on both voice calls and chats.
 
-> **Superseded in part (2026-08-22).** Section 2 records decisions as they were
-> made and is not edited in place. Two of them no longer hold: the database
-> moved from Supabase Postgres to PlanetScale Postgres with Drizzle ORM, and
-> RLS-as-backstop was dropped rather than implemented. See the note under
-> section 2. Sections 3, 4, 6 and 9 describe the system as it is now and have
-> been corrected.
+> **Superseded in part (2026-08-24).** Section 2 records decisions as they were
+> made and is not edited in place. Three of them no longer hold: the database
+> moved from Supabase Postgres to PlanetScale Postgres with Drizzle ORM,
+> RLS-as-backstop was dropped rather than implemented, and Supabase is gone
+> entirely — dashboard realtime is now served by the bridge itself. See the
+> note under section 2. Sections 3, 4, 6 and 9 describe the system as it is now
+> and have been corrected.
 
 ---
 
@@ -53,10 +54,20 @@ was decided and why at the time. What changed since:
   cluster, with reside in a sibling database that its role cannot `CONNECT` to.
   The schema source of truth is `packages/database/src/schema/index.ts`;
   `supabase/migrations/` is frozen history.
-- **Supabase is still a live dependency, for Realtime pub/sub only** —
-  `@supabase/supabase-js` against the hosted project. Live inbox updates,
-  presence, and "chat needs a human" notifications all still run on it, so the
-  Realtime arrows in section 3 are unchanged.
+- **Supabase is gone; realtime moved onto the bridge** (2026-08-24). Live
+  inbox updates, presence, and "chat needs a human" notifications now run over
+  an authenticated WebSocket the realtime-bridge serves at `/dashboard`, which
+  removed the last hosted dependency and the three `SUPABASE_*` variables with
+  it. Two things got better in the move: the channel is authenticated (the web
+  app mints a short-lived token from the Better Auth session and the bridge
+  scopes the socket to the tenant in it), where the Supabase channels were
+  public to any holder of the anon key — presence broadcast agent names on
+  them — and presence and change notification became one subscription instead
+  of two, since the client's "this conversation is open" says both. The cost is
+  a single-instance assumption for dashboard fan-out, which the bridge already
+  made for chat sessions. Payloads stay content-free regardless: the dashboard
+  refetches through its own tenant-scoped route, which is the only path that
+  ever carried message text.
 - **RLS-as-backstop was dropped, not deferred.** The policies keyed off
   `auth.uid()`, which this app stopped supplying when it adopted Better Auth,
   and the connection role carries `BYPASSRLS` regardless. They were never
@@ -97,7 +108,7 @@ was decided and why at the time. What changed since:
                   │    Twilio REST API                        │               │
                   │  - Chat: marks conversation as              │               │
                   │    "needs human", notifies dashboard          │               │
-                  │    via Supabase Realtime                        │               │
+                  │    over its own /dashboard WS                    │               │
                   └────────────┬─────────────────────────────────────┘               │
                                │ (internal network, same Railway project)             │
                                └───────────────────────────────────┬───────────────────┘
@@ -123,14 +134,19 @@ was decided and why at the time. What changed since:
                                         └──────────► Next.js app
 
                               ┌──────────────────────────────────┐
-                              │  SUPABASE (Realtime only)           │
-                              │  - pub/sub: live inbox, presence,     │
-                              │    needs-human notifications           │
-                              │  - No Postgres, no Supabase Auth        │
+                              │  DASHBOARD WS (realtime bridge)     │
+                              │  - WS /dashboard: live inbox,         │
+                              │    presence, needs-human               │
+                              │  - Token minted by Next.js from the     │
+                              │    Better Auth session; bridge scopes    │
+                              │    the socket to that tenant              │
+                              │  - In-process fan-out, no third party      │
                               └──────────────────────────────────┘
                                         ▲            ▲
-                                        │            └── Next.js app
-                                        └─────────────── Realtime bridge
+                                        │            └── Browser (inbox)
+                                        └─────────────── Next.js app
+                                                        (POST /internal/broadcast
+                                                         for merge/split)
 ```
 
 **Why the bridge service now handles two jobs:** both voice and chat need a persistent, stateful connection to OpenAI's Realtime API — voice in speech-to-speech mode, chat in text-only mode. Rather than standing up a second persistent service, the existing bridge is extended to also terminate browser WebSocket connections from the chat widget. This keeps "things that need a long-lived connection" consolidated in one place, and lets both channels share the same AI session-handling logic, function/tool definitions (including `transfer_to_human`), and transcript-persistence code path.
@@ -215,7 +231,7 @@ LiveTransfer
 - `is_anonymous` lets a web chat `Identity` exist with no phone and no email. Converting an anonymous identity to a named one (visitor eventually gives a name/email) is logged via `IdentityConversionLog` rather than just overwriting fields, so there's a record of when/how contact info was captured.
 - One `Conversation` per identity holds the full multi-channel thread; routing (`assigned_team_id`/`assigned_user_id`) happens within that single conversation rather than splitting threads per team.
 - `LiveTransfer` (renamed from a voice-only `CallTransfer`) is logged independently of `Message` and now covers both voice and web chat handoffs to a human — it's the record of _attempts_, including failures, which matters for staffing/coverage analysis later (e.g. missed after-hours transfer rate, across both channels).
-- Live "who's viewing this conversation" presence is ephemeral (Supabase Realtime presence/broadcast) and does not need to be persisted to a table. The same presence mechanism is used to show "live chat needs a human" in the dashboard.
+- Live "who's viewing this conversation" presence is ephemeral (in-memory on the realtime bridge, derived from which conversation each dashboard socket says it has open) and does not need to be persisted to a table. The same socket carries "live chat needs a human" to the dashboard.
 
 ---
 
@@ -275,7 +291,7 @@ LiveTransfer
 7. Visitor asks for a human, or the AI determines escalation is needed
 8. Agent calls transfer_to_human(reason, conversation_id)
 9. Bridge:
-   a. Marks the Conversation as "needs human" via Supabase Realtime
+   a. Marks the Conversation as "needs human" on the dashboard WS
       (no phone dial equivalent — this is a presence/notification event)
    b. Tells the visitor "connecting you to a team member"
    c. Logs the attempt to LiveTransfer (channel = web_chat)

@@ -1,6 +1,5 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { DomainService } from "./index";
-import type { AppSupabaseClient } from "../client";
 import { createTestDb, resetTestDb, type TestDb } from "../testing/pglite";
 import { conversations, identities, tenants, users } from "../schema";
 import { asResideClientUid } from "@communication-canoe/shared/brands";
@@ -14,7 +13,7 @@ const OTHER = "22222222-2222-2222-2222-222222222222";
 
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
-  domain = new DomainService(null as unknown as AppSupabaseClient, db);
+  domain = new DomainService(db);
 }, 60_000);
 
 afterAll(async () => {

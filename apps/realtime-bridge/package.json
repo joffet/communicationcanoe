@@ -15,7 +15,6 @@
     "@communication-canoe/database": "workspace:*",
     "@communication-canoe/messaging": "workspace:*",
     "@communication-canoe/shared": "workspace:*",
-    "@supabase/supabase-js": "^2.49.8",
     "openai": "^4.104.0",
     "tsx": "^4.20.3",
     "twilio": "^5.7.0",

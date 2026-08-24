@@ -1,6 +1,5 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { DomainService } from "./index";
-import type { AppSupabaseClient } from "../client";
 import { createTestDb, resetTestDb, type TestDb } from "../testing/pglite";
 import { outboundBatches, outboundBatchRecipients, tenants } from "../schema";
 import { asResideClientUid, type TenantId } from "@communication-canoe/shared/brands";
@@ -11,10 +10,7 @@ let domain: DomainService;
 
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
-  // The supabase-js client is unused by the methods under test - they are
-  // converted. Passing null makes that explicit: if one of them reaches for
-  // supabase-js, the test crashes rather than quietly passing.
-  domain = new DomainService(null as unknown as AppSupabaseClient, db);
+  domain = new DomainService(db);
 }, 60_000);
 
 afterAll(async () => {

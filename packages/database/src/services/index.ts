@@ -33,8 +33,8 @@ import {
   outboundBatchRecipients,
   outboundBatches,
 } from "../schema";
-import type { AppSupabaseClient } from "../client";
-import { createServiceClient, normalizeEmail, normalizePhone } from "../client";
+import { normalizeEmail, normalizePhone } from "../client";
+import { notifyDashboardConversation } from "../realtime/notify";
 import {
   createChatSessionToken,
   verifyChatSessionToken,
@@ -84,33 +84,18 @@ function normalizeEmailSubject(subject: string): string {
 
 export class DomainService {
   #orm?: Db;
-  #supabase?: AppSupabaseClient;
 
   /**
-   * Both handles are lazy, and for the same reason: nothing should pay for a
-   * connection it never uses.
-   *
-   * Every query here is Drizzle now. Supabase remains for exactly one thing -
-   * the Realtime channel that broadcasts conversation changes, which is pub/sub
-   * with no database involved. Constructing that client eagerly meant every
-   * realtime-bridge worker tick built a Supabase client it never touched, and
-   * then died on the missing keys once the bridge stopped carrying them.
+   * The connection is lazy because nothing should pay for one it never uses:
+   * realtime-bridge constructs a DomainService on every worker tick, and most
+   * ticks find nothing to do.
    */
-  constructor(
-    supabaseOverride?: AppSupabaseClient | null,
-    ormOverride?: Db,
-  ) {
-    this.#supabase = supabaseOverride ?? undefined;
+  constructor(ormOverride?: Db) {
     this.#orm = ormOverride;
   }
 
   protected get orm(): Db {
     return (this.#orm ??= createDb());
-  }
-
-  /** Realtime broadcast only - see the constructor. */
-  protected get db(): AppSupabaseClient {
-    return (this.#supabase ??= createServiceClient());
   }
 
   async resolveTenantByPhone(phone: string): Promise<Tenant | null> {
@@ -1678,29 +1663,20 @@ export class DomainService {
   }
 
   /** Signals comm-canoe's own dashboard (apps/web/src/components/inbox/
-   * chat-realtime.tsx's useConversationRealtime, subscribed to
-   * `chat:conversation:{id}` for whichever conversation is currently
-   * selected) that a conversation changed structurally, so it refetches
-   * instead of waiting for a poll/reload. Deliberately a distinct "updated"
-   * event, not a reuse of the existing "message" broadcast/
-   * ChatBroadcastMessage payload - that type is web_chat-shaped
-   * (channel: "web_chat" literal) and is only ever fired today from the
-   * live chat-widget's own session code (chat-session.ts); a merge/split
+   * chat-realtime.tsx's useConversationRealtime, watching whichever
+   * conversation is currently selected) that a conversation changed
+   * structurally, so it refetches instead of waiting for a poll/reload.
+   * Deliberately a distinct "updated" event rather than a reuse of the
+   * "message" one - that one is web_chat-shaped and is only ever fired from
+   * the live chat-widget's own session code (chat-session.ts); a merge/split
    * can affect a conversation of any channel, and the frontend listener
-   * ignores the payload anyway (it only triggers a refetch), so a minimal,
-   * honestly-named event is simpler than stretching a chat-specific shape
-   * to fit. Uses `this.db` directly rather than importing realtime-bridge's
-   * broadcast.ts, since that file lives in a different app and the two
-   * don't cross-import (same boundary Phase 5's notify helpers respected). */
+   * refetches either way, so a minimal, honestly-named event is simpler than
+   * stretching a chat-specific shape to fit. Goes over HTTP to the bridge
+   * rather than importing its hub directly, since that lives in a different
+   * app and the two don't cross-import (same boundary Phase 5's notify
+   * helpers respected). */
   private async broadcastConversationUpdated(conversationId: string): Promise<void> {
-    const channel = this.db.channel(`chat:conversation:${conversationId}`);
-    await new Promise<void>((resolve) => {
-      channel.subscribe((status) => {
-        if (status === "SUBSCRIBED") resolve();
-      });
-    });
-    await channel.send({ type: "broadcast", event: "updated", payload: {} });
-    await this.db.removeChannel(channel);
+    await notifyDashboardConversation(conversationId, "updated");
   }
 
   /** Merges sourceId into targetId: both are resolved to canonical first
@@ -2532,8 +2508,9 @@ export class DomainService {
   }
 }
 
-export function createDomainService(db?: AppSupabaseClient) {
-  return new DomainService(db);
+export function createDomainService(ormOverride?: Db) {
+  return new DomainService(ormOverride);
 }
 
 export * from "./chat-session";
+export * from "./dashboard-token";

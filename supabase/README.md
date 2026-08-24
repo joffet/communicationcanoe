@@ -24,6 +24,7 @@ for run order).
 configured the local Supabase Docker stack (`supabase start`), which stopped
 being the dev database at the cutover.
 
-Supabase itself is still a live dependency — `@supabase/supabase-js` for
-Realtime pub/sub — but that is the hosted project's Realtime service, unrelated
-to anything here.
+Supabase is no longer a dependency of any kind. The last use — `@supabase/supabase-js`
+for Realtime pub/sub — was replaced on 2026-08-24 by an authenticated WebSocket
+the realtime-bridge serves itself (`apps/realtime-bridge/src/realtime/dashboard-hub.ts`).
+This directory is history only.

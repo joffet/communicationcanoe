@@ -11,6 +11,14 @@ dropped along the way has no trace there, and a reader who needs the history —
 did RLS actually enforce?" — will not find it in the schema file. That is what
 this document is for.
 
+> **As-of note (2026-08-24).** This document describes the state at the
+> PlanetScale cutover, and its present-tense references to a Supabase client —
+> `DomainService`'s `protected get db()`, `AppSupabaseClient`, the three
+> `channel()` call sites — outlived that state by two days. Realtime moved onto
+> the realtime-bridge's own WebSocket and `@supabase/supabase-js` was removed
+> from every package; read those passages as history, like the rest of this
+> file.
+
 Three kinds of thing are recorded here:
 
 1. **[What was collapsed away](#1-what-was-collapsed-away)** — objects that
@@ -577,9 +585,9 @@ alongside it.
   (`20250620160100`). Supabase's Postgres-changes CDC feed. Already vestigial
   before the cutover: `apps/web/src/lib/supabase/realtime.ts` and
   `apps/realtime-bridge/src/realtime/broadcast.ts` use `channel().send()`
-  broadcast and presence, never `postgres_changes`. The Realtime dependency that
-  remains is pub/sub against the hosted Supabase project and does not read the
-  database at all.
+  broadcast and presence, never `postgres_changes`. That pub/sub dependency did
+  not read the database either, and is itself gone now — see the as-of note at
+  the top.
 - **`auth.users`** — the whole schema. See §1.5 for the FK and trigger that
   referenced it.
 - **`rls_auto_enable()` and `ensure_rls_on_new_table`** — see §3.3.

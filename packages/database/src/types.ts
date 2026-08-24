@@ -4,11 +4,11 @@
 // snake_case mirror of every table - 23 Row/Insert pairs, a TableDef wrapper,
 // a DatabaseFunctions map of RPC signatures, and the `Database` type that
 // composed them - which existed solely to parameterize
-// SupabaseClient<Database>. That client no longer touches tables: there is no
-// `.from()` or `.rpc()` call left in the codebase, only `channel()` for
-// Realtime. The mirror described a query surface nobody used, in a casing
-// nothing else here speaks, and it was deleted; see
-// src/schema/notes.md for the inventory it contained.
+// SupabaseClient<Database>. The mirror described a query surface nobody used,
+// in a casing nothing else here speaks, and it was deleted; see
+// src/schema/notes.md for the inventory it contained. The client it
+// parameterized outlived it by one cutover and is gone too - Realtime now runs
+// on the bridge's own socket - so nothing in this package speaks to Supabase.
 //
 // Naming convention, now that the two shapes are one: a bare noun is the
 // Drizzle select shape (`Tenant`, `Message`, `DocumentChunk`), `New<Noun>` is

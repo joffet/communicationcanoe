@@ -1,6 +1,6 @@
 # Communication Canoe
 
-Multi-tenant customer enquiry platform for voice, SMS, email, and embeddable web chat — built as a pnpm monorepo with Next.js 16, Better Auth, PlanetScale Postgres (Drizzle ORM), and Tailwind CSS. Supabase remains in the stack for Realtime pub/sub only.
+Multi-tenant customer enquiry platform for voice, SMS, email, and embeddable web chat — built as a pnpm monorepo with Next.js 16, Better Auth, PlanetScale Postgres (Drizzle ORM), and Tailwind CSS. Live dashboard updates run on the realtime bridge's own WebSocket — there is no third-party realtime service.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for system design, data model, and build order.
 
@@ -19,14 +19,14 @@ supabase/             Pre-cutover migration history and dev seed — no longer a
 
 - Node.js 22.13+ (the root `package.json` `engines` field requires it)
 - pnpm 9+ (`corepack enable`)
-- [PlanetScale](https://planetscale.com) Postgres database (app data), plus a hosted [Supabase](https://supabase.com) project for Realtime
+- [PlanetScale](https://planetscale.com) Postgres database (app data)
 
 ## Quick Start
 
 ```bash
 pnpm install
 cp .env.example apps/web/.env.local
-# Fill in: DATABASE_URL, MIGRATION_DATABASE_URL, Supabase URL/keys, BETTER_AUTH_SECRET
+# Fill in: DATABASE_URL, MIGRATION_DATABASE_URL, BETTER_AUTH_SECRET, INTERNAL_API_SECRET
 
 # Once per cluster, as the postgres role — creates the logical database and app
 # role. See packages/database/sql/README.md for run order and how to execute it.
@@ -59,11 +59,13 @@ Generate `BETTER_AUTH_SECRET`:
 openssl rand -base64 32
 ```
 
-`DATABASE_URL` is the app role's PlanetScale connection string (`comm_canoe_app`); `MIGRATION_DATABASE_URL` is the `postgres` role's, used by drizzle-kit only. The app role owns nothing and holds no `CREATE`, so it cannot run DDL by design — see the comments in [drizzle.config.ts](packages/database/drizzle.config.ts). The Supabase URL/keys are for Realtime only.
+`DATABASE_URL` is the app role's PlanetScale connection string (`comm_canoe_app`); `MIGRATION_DATABASE_URL` is the `postgres` role's, used by drizzle-kit only. The app role owns nothing and holds no `CREATE`, so it cannot run DDL by design — see the comments in [drizzle.config.ts](packages/database/drizzle.config.ts).
+
+`INTERNAL_API_SECRET` must be the same value in both services: it authenticates web → bridge calls and signs the short-lived tokens the dashboard presents when it opens its live socket. Without it the inbox still works but stops updating on its own.
 
 ## Auth and Tenant Access
 
-Auth runs via **Better Auth** (magic link only) inside the Next.js app — not Supabase Auth. Outbound email uses **Amazon SES**.
+Auth runs via **Better Auth** (magic link only) inside the Next.js app. Outbound email uses **Amazon SES**.
 
 1. Sign in at `/login` — enter your email and open the magic link (creates Better Auth user + `public.users` on first sign-in).
 2. Grant tenant access against the database (replace `YOUR_USER_ID` with the Better Auth user id):
@@ -77,7 +79,7 @@ VALUES ('YOUR_USER_ID', '11111111-1111-1111-1111-111111111111', 'admin');
 
 Magic links send from `info@communicationcanoe.com` by default. Tenant-scoped outbound email uses each tenant's `inbound_email_address` when available (must be verified in SES).
 
-**Tenant isolation** is enforced in application code and nowhere else: every dashboard/API route verifies session + `user_tenant_memberships` before querying with an explicit `tenant_id`. There is no RLS backstop — the Supabase policies keyed off `auth.uid()` and were dropped at the cutover rather than ported, so each `WHERE tenant_id = $1` *is* the boundary.
+**Tenant isolation** is enforced in application code and nowhere else: every dashboard/API route verifies session + `user_tenant_memberships` before querying with an explicit `tenant_id`. There is no RLS backstop — the old policies keyed off Supabase Auth's `auth.uid()` and were dropped at the cutover rather than ported, so each `WHERE tenant_id = $1` *is* the boundary. The dashboard's live socket is scoped the same way: the web app checks membership when it mints the token, and the bridge trusts nothing else.
 
 Two test files replaced them, covering the two different ways a method can be scoped:
 
@@ -153,7 +155,7 @@ When adding a user from admin, the **Send sign-in email** toggle (default on) se
 
 - **Railway:** deploy `apps/web` and `apps/realtime-bridge` as separate services.
 - **PlanetScale:** Postgres for all app data; migrations run with `MIGRATION_DATABASE_URL`, the app with `DATABASE_URL`.
-- **Supabase:** Realtime only; no Supabase Postgres or Supabase Auth required.
+- **Realtime:** served by `apps/realtime-bridge` itself. `REALTIME_BRIDGE_PUBLIC_WS_URL` must be the browser-reachable `wss://` URL of that service, and `INTERNAL_API_SECRET` must match across both.
 - Set `BETTER_AUTH_URL` and `NEXT_PUBLIC_APP_URL` to your production URL.
 
 ## Out of Scope (This Milestone)

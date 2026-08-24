@@ -1,7 +1,6 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { DomainService } from "./index";
-import type { AppSupabaseClient } from "../client";
 import { createTestDb, resetTestDb, type TestDb } from "../testing/pglite";
 import { conversationReadStates, conversations, identities, messages, tenants, users } from "../schema";
 import { asResideClientUid, type TenantId } from "@communication-canoe/shared/brands";
@@ -14,9 +13,7 @@ const VIEWER = "11111111-1111-1111-1111-111111111111";
 
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
-  // Null supabase-js client: this method is converted, so reaching for the old
-  // client crashes rather than quietly passing.
-  domain = new DomainService(null as unknown as AppSupabaseClient, db);
+  domain = new DomainService(db);
 }, 60_000);
 
 afterAll(async () => {
