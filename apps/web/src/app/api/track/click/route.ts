@@ -1,5 +1,9 @@
 import { createDomainService } from "@communication-canoe/database";
-import { verifyEmailClickToken, type EmailClickTokenPayload } from "@communication-canoe/messaging";
+import {
+  readEmailClickToken,
+  verifyEmailClickToken,
+  type EmailClickTokenPayload,
+} from "@communication-canoe/messaging";
 import { notifyResideMessageClicked } from "@/lib/reside/notify-message-clicked";
 
 /**
@@ -18,10 +22,11 @@ import { notifyResideMessageClicked } from "@/lib/reside/notify-message-clicked"
  * open redirect by anyone who receives one of these links - which, for a
  * building notice, is everyone in the building.
  *
- * A bad, expired or tampered token gets a 404 rather than a redirect
- * anywhere. There is no safe default destination: sending them to the app's
- * home page would mean a forged link still moves somebody somewhere, and the
- * token is the only thing that says where they were meant to go.
+ * A bad or tampered token gets a 404 rather than a redirect anywhere. There is
+ * no safe default destination: sending them to the app's home page would mean
+ * a forged token still moves somebody somewhere, and the token is the only
+ * thing that says where they were meant to go. An *expired* one is a different
+ * case and is honoured - see the GET below.
  *
  * Recording never blocks the reader. A click that cannot be written down is a
  * statistic nobody gets; a reader stranded on an error page because of it is
@@ -47,15 +52,23 @@ async function record(payload: EmailClickTokenPayload): Promise<void> {
 
 export async function GET(request: Request) {
   const token = new URL(request.url).searchParams.get("t");
-  const payload = token ? verifyEmailClickToken(token) : null;
+  const reading = token ? readEmailClickToken(token) : null;
 
-  if (!payload) {
+  if (!reading) {
     return new Response("Not found", { status: 404 });
   }
 
-  await record(payload);
+  // An expired token still sends them where they were going. The destination
+  // is inside the signature, so it is the one this service minted and nobody
+  // can have changed it - and a resident opening a five-week-old email
+  // deserves the page, not a bare 404. What age still gates is the write: a
+  // click is recorded only while the token is current, which is the whole of
+  // what `exp` now means.
+  if (!reading.expired) {
+    await record(reading.payload);
+  }
 
-  return Response.redirect(payload.url, 302);
+  return Response.redirect(reading.payload.url, 302);
 }
 
 /**

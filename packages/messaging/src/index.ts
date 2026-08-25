@@ -11,9 +11,13 @@ export type { EmailOpenTokenPayload } from "./email/open-tracking-token";
 export {
   createEmailClickToken,
   verifyEmailClickToken,
+  readEmailClickToken,
   isRedirectableUrl,
 } from "./email/click-tracking-token";
-export type { EmailClickTokenPayload } from "./email/click-tracking-token";
+export type {
+  EmailClickTokenPayload,
+  EmailClickTokenReading,
+} from "./email/click-tracking-token";
 export { withClickTracking } from "./email/click-tracking";
 
 export { dispatchOutboundMessage } from "./dispatch-message";

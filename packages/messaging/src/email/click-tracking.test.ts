@@ -1,8 +1,10 @@
+import { createHmac } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { withClickTracking } from "./click-tracking";
 import {
   createEmailClickToken,
   isRedirectableUrl,
+  readEmailClickToken,
   verifyEmailClickToken,
 } from "./click-tracking-token";
 
@@ -269,6 +271,87 @@ describe("the token reside receives", () => {
       messageId: "msg-1",
       url: "https://onecardiff.ca/member/notices/abc?a=1",
     });
+  });
+});
+
+/**
+ * Expiry gates the write, not the read.
+ *
+ * Refusing on age meant a resident opening a five-week-old email got a bare
+ * 404 for a page that still exists and that they are entitled to see. The
+ * destination is inside the signature, so sending them there is safe however
+ * old the token is - what stays bounded is recording a click on the strength
+ * of one.
+ *
+ * Everything below is the same set of forgeries the strict path refuses. The
+ * risk in relaxing a gate is relaxing the wrong one.
+ */
+describe("reading an expired click token", () => {
+  const expired = () => createEmailClickToken("msg-1", "https://x.test/go", -1);
+
+  it("returns the destination, marked expired", () => {
+    expect(readEmailClickToken(expired())).toEqual({
+      payload: expect.objectContaining({ messageId: "msg-1", url: "https://x.test/go" }),
+      expired: true,
+    });
+  });
+
+  it("marks a current token unexpired", () => {
+    const reading = readEmailClickToken(createEmailClickToken("msg-1", "https://x.test/go"));
+    expect(reading?.expired).toBe(false);
+  });
+
+  /* The strict path is what the beacon uses: nobody is stranded by a refusal
+   * there, because the page has already loaded. */
+  it("is still refused by the strict path", () => {
+    expect(verifyEmailClickToken(expired())).toBeNull();
+  });
+
+  it("still refuses a tampered signature", () => {
+    expect(readEmailClickToken(`${expired().split(".")[0]}.deadbeef`)).toBeNull();
+  });
+
+  it("still refuses a swapped destination", () => {
+    const token = expired();
+    const payload = JSON.parse(Buffer.from(token.split(".")[0], "base64url").toString("utf8"));
+    const forged = Buffer.from(
+      JSON.stringify({ ...payload, url: "https://evil.test" }),
+    ).toString("base64url");
+    expect(readEmailClickToken(`${forged}.${token.split(".")[1]}`)).toBeNull();
+  });
+
+  it("still refuses an unredirectable scheme", () => {
+    expect(readEmailClickToken(createEmailClickToken("msg-1", "javascript:alert(1)", -1))).toBeNull();
+  });
+
+  /* "No expiry I can read" is not the same claim as "an expiry that has
+   * passed", and only the second is safe to wave through.
+   *
+   * The payload has to be genuinely signed for this to test anything. Pairing
+   * a malformed payload with some other token's signature is refused by the
+   * signature check long before the exp is read, and the test would pass with
+   * the exp check deleted. */
+  it("refuses a malformed or missing exp", () => {
+    for (const exp of [undefined, "soon", null]) {
+      const encoded = Buffer.from(
+        JSON.stringify({ messageId: "msg-1", url: "https://x.test/go", exp }),
+      ).toString("base64url");
+      const signature = createHmac("sha256", process.env.CHAT_SESSION_SECRET!)
+        .update(encoded)
+        .digest("base64url");
+
+      // The signature is real: only the payload shape is wrong.
+      expect(readEmailClickToken(`${encoded}.${signature}`)).toBeNull();
+      // ...and the control, so a change to how tokens are signed shows up
+      // here as a failure rather than as a test that stopped testing.
+      const wellFormed = Buffer.from(
+        JSON.stringify({ messageId: "msg-1", url: "https://x.test/go", exp: Date.now() + 1000 }),
+      ).toString("base64url");
+      const goodSignature = createHmac("sha256", process.env.CHAT_SESSION_SECRET!)
+        .update(wellFormed)
+        .digest("base64url");
+      expect(readEmailClickToken(`${wellFormed}.${goodSignature}`)).not.toBeNull();
+    }
   });
 });
 
