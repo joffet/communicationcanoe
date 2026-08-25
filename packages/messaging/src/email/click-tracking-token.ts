@@ -45,7 +45,28 @@ export function createEmailClickToken(
   return `${encoded}.${sign(encoded)}`;
 }
 
-export function verifyEmailClickToken(token: string): EmailClickTokenPayload | null {
+export type EmailClickTokenReading = {
+  payload: EmailClickTokenPayload;
+  /** Past its `exp`. Still authentic - the signature verified - just old. */
+  expired: boolean;
+};
+
+/**
+ * Verifies a token and reports its age, rather than refusing on it.
+ *
+ * Expiry is separated from validity because the two gate different things.
+ * Sending somebody to the destination is safe however old the token is: the
+ * URL is inside the signature, so it is the one this service minted and
+ * nobody can have changed it. Refusing on age instead meant a resident
+ * opening a five-week-old email got a bare 404 for a page that still exists
+ * and that they are entitled to see - the notice failing at the only thing it
+ * was for.
+ *
+ * Writing a click to the database on the strength of an old token is the part
+ * worth bounding, and that is what `exp` still gates. Honouring it for both
+ * the read and the write would leave `exp` meaning nothing at all.
+ */
+export function readEmailClickToken(token: string): EmailClickTokenReading | null {
   const [encoded, signature] = token.split(".");
   if (!encoded || !signature) return null;
 
@@ -60,18 +81,27 @@ export function verifyEmailClickToken(token: string): EmailClickTokenPayload | n
     const payload = JSON.parse(
       Buffer.from(encoded, "base64url").toString("utf8"),
     ) as EmailClickTokenPayload;
-    if (!payload.messageId || typeof payload.exp !== "number" || payload.exp < Date.now()) {
-      return null;
-    }
+    // A malformed exp is still fatal. "No expiry I can read" is not the same
+    // claim as "an expiry that has passed", and only the second one is safe
+    // to wave through.
+    if (!payload.messageId || typeof payload.exp !== "number") return null;
     // A signature over a payload with no url is still a valid signature, so
     // the shape is checked as well as the signature - and only a destination
     // this service would have minted is honoured, which is what stops a
     // signed token being replayed with a javascript: or data: target.
     if (!isRedirectableUrl(payload.url)) return null;
-    return payload;
+    return { payload, expired: payload.exp < Date.now() };
   } catch {
     return null;
   }
+}
+
+/** The strict reading: a token good enough to act on, expiry included. Used
+ * where there is no reader to strand - the beacon has already delivered them
+ * to the page, so an expired token there costs a statistic and nothing else. */
+export function verifyEmailClickToken(token: string): EmailClickTokenPayload | null {
+  const reading = readEmailClickToken(token);
+  return reading && !reading.expired ? reading.payload : null;
 }
 
 /**
