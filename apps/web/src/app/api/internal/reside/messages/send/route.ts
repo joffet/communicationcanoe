@@ -24,6 +24,7 @@ export async function POST(request: Request) {
     conversationId,
     idempotencyKey,
     from,
+    attachments,
   } = parsed.data;
 
   const to = channel === "sms" ? identity.phone : identity.email;
@@ -93,7 +94,7 @@ export async function POST(request: Request) {
     visibility: "external",
   });
 
-  const sent = await dispatchOutboundMessage({ tenant, message, to, from });
+  const sent = await dispatchOutboundMessage({ tenant, message, to, from, attachments });
 
   return Response.json({
     message: {

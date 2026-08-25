@@ -1,6 +1,7 @@
 import { withRetry, isRetryableSesError } from "@communication-canoe/shared/retry";
 import { sendSesEmail } from "./ses";
 import type { TenantMailFrom } from "./from";
+import type { FetchedEmailAttachment } from "./attachments";
 
 export type SendTenantReplyEmailOptions = {
   to: string;
@@ -17,6 +18,10 @@ export type SendTenantReplyEmailOptions = {
   /** When true, `text` is already HTML (e.g. reside's rendered notification/notice
    * body) and is passed straight to SES rather than escaped and wrapped in a <p>. */
   isHtml?: boolean;
+  /** Already-fetched attachment bytes - see fetchEmailAttachments. Presence
+   * routes the send through SES's raw-MIME path (sendSesEmail's
+   * sendRawSesEmail branch). */
+  attachments?: FetchedEmailAttachment[];
 };
 
 export type SendTenantReplyEmailResult = {
@@ -39,6 +44,7 @@ export async function sendTenantReplyEmail(
         replyTo: options.replyTo,
         tenant: options.tenant,
         configurationSetName: process.env.SES_CONFIGURATION_SET_NAME,
+        attachments: options.attachments,
       }),
     { isRetryable: isRetryableSesError },
   );
