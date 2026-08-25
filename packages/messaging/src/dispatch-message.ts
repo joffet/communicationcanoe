@@ -77,7 +77,13 @@ export async function dispatchOutboundMessage(params: {
       // and the rewriter only touches anchors. Same per-message identity the
       // pixel uses: message.id is this recipient's own row, which is what
       // makes a click attributable to a person rather than to a batch.
-      html = withClickTracking(html, message.id);
+      //
+      // The tenant's own reside host decides which links keep their URL and
+      // carry the token as a parameter, and which are wrapped in a redirect -
+      // a wrapped link can never open the reside mobile app. Same value the
+      // portal link above prefers, for the same reason: One Cardiff's
+      // residents are sent to One Cardiff's host, not a shared one.
+      html = withClickTracking(html, message.id, tenant.resideAppUrl);
       const result = await sendTenantReplyEmail({
         to,
         subject: message.subject ?? "",

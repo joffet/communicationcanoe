@@ -7,10 +7,15 @@ import {
 } from "./click-tracking-token";
 
 const APP = "https://canoe.test";
+const RESIDE = "https://onecardiff.ca";
 
 beforeEach(() => {
   process.env.NEXT_PUBLIC_APP_URL = APP;
   process.env.CHAT_SESSION_SECRET = "test-secret";
+  // Every test below that does not pass a reside host expects the wrap-
+  // everything behaviour, and would otherwise depend on whatever the
+  // developer running it happens to have exported.
+  delete process.env.RESIDE_APP_URL;
 });
 
 /** The destination a rewritten anchor actually sends somebody to. */
@@ -114,6 +119,127 @@ describe("withClickTracking", () => {
   it("does not rewrite a link it already rewrote", () => {
     const once = withClickTracking('<a href="https://x.test/go">x</a>', "msg-1");
     expect(withClickTracking(once, "msg-1")).toBe(once);
+  });
+});
+
+describe("withClickTracking, on the tenant's own host", () => {
+  /** The token carried by a parameter rather than by the recorder's URL. */
+  function paramTokenOf(html: string): string | null {
+    const match = /(?:[?&]|&amp;)ccm=([^"'&]+)/.exec(html);
+    return match ? match[1] : null;
+  }
+
+  function paramDestinationOf(html: string): string | null {
+    const token = paramTokenOf(html);
+    return token ? (verifyEmailClickToken(token)?.url ?? null) : null;
+  }
+
+  /**
+   * The reason the split exists. iOS and Android match app links against the
+   * URL that was tapped and do not re-evaluate after a redirect, so a link
+   * wrapped in this service's domain can never open the reside mobile app.
+   */
+  it("keeps the destination and appends the token as a parameter", () => {
+    const html = withClickTracking(
+      '<a href="https://onecardiff.ca/member/notices/abc">Read it</a>',
+      "msg-1",
+      RESIDE,
+    );
+
+    expect(html).not.toContain("/api/track/click");
+    expect(html).toContain('href="https://onecardiff.ca/member/notices/abc?ccm=');
+    expect(html).toContain(">Read it</a>");
+  });
+
+  /* The recorded URL comes from the signature, not from whatever the
+   * reporting page claims - so the parameter must not be inside it. */
+  it("signs the destination without the parameter it is about to add", () => {
+    const html = withClickTracking('<a href="https://onecardiff.ca/p">x</a>', "msg-1", RESIDE);
+    expect(paramDestinationOf(html)).toBe("https://onecardiff.ca/p");
+  });
+
+  it("wraps an off-domain link in the same email", () => {
+    const html = withClickTracking(
+      '<a href="https://onecardiff.ca/p">ours</a><a href="https://city.test/bylaw">theirs</a>',
+      "msg-1",
+      RESIDE,
+    );
+
+    expect(html).toContain('href="https://onecardiff.ca/p?ccm=');
+    expect(html).toContain(`${APP}/api/track/click?t=`);
+    expect(destinationOf(html)).toBe("https://city.test/bylaw");
+  });
+
+  /* A notice author writing the building's address with the prefix means the
+   * same site. Getting this wrong is silent: the link is wrapped, and a
+   * wrapped link cannot open the app. */
+  it("treats www as the same host", () => {
+    const html = withClickTracking('<a href="https://www.onecardiff.ca/p">x</a>', "msg-1", RESIDE);
+    expect(html).not.toContain("/api/track/click");
+    expect(html).toContain("?ccm=");
+  });
+
+  it("joins an existing query with & and stays before the fragment", () => {
+    const query = withClickTracking('<a href="https://onecardiff.ca/p?a=1">x</a>', "msg-1", RESIDE);
+    // Encoded, because it is going into an HTML attribute.
+    expect(query).toContain("a=1&amp;ccm=");
+
+    const fragment = withClickTracking(
+      '<a href="https://onecardiff.ca/p#section">x</a>',
+      "msg-1",
+      RESIDE,
+    );
+    expect(fragment).toMatch(/href="https:\/\/onecardiff\.ca\/p\?ccm=[^"]+#section"/);
+  });
+
+  /**
+   * An admin who pastes a link out of a tracked email they received would
+   * otherwise send every resident a URL carrying their own message id, and
+   * `URLSearchParams.get` returns the first of two - so every click in the
+   * building would land on the admin's row.
+   */
+  it("replaces an existing parameter rather than appending a second", () => {
+    const once = withClickTracking('<a href="https://onecardiff.ca/p">x</a>', "msg-1", RESIDE);
+    const twice = withClickTracking(once, "msg-2", RESIDE);
+
+    expect(twice.match(/ccm=/g)).toHaveLength(1);
+    expect(verifyEmailClickToken(paramTokenOf(twice)!)).toMatchObject({
+      messageId: "msg-2",
+      url: "https://onecardiff.ca/p",
+    });
+  });
+
+  it("keeps the other parameters when it replaces one", () => {
+    const html = withClickTracking(
+      '<a href="https://onecardiff.ca/p?a=1&amp;ccm=stale&amp;b=2">x</a>',
+      "msg-1",
+      RESIDE,
+    );
+    expect(html).not.toContain("ccm=stale");
+    expect(paramDestinationOf(html)).toBe("https://onecardiff.ca/p?a=1&b=2");
+  });
+
+  it("decodes entities before signing, like the wrapped path", () => {
+    const html = withClickTracking(
+      '<a href="https://onecardiff.ca/p?a=1&amp;b=2">x</a>',
+      "msg-1",
+      RESIDE,
+    );
+    expect(paramDestinationOf(html)).toBe("https://onecardiff.ca/p?a=1&b=2");
+  });
+
+  /* Every send did this before the parameter existed, and a tenant with no
+   * routing domain configured still does. */
+  it("wraps everything when the tenant has no reside host", () => {
+    const html = withClickTracking('<a href="https://onecardiff.ca/p">x</a>', "msg-1", null);
+    expect(html).toContain(`${APP}/api/track/click?t=`);
+    expect(destinationOf(html)).toBe("https://onecardiff.ca/p");
+  });
+
+  it("falls back to the RESIDE_APP_URL env var", () => {
+    process.env.RESIDE_APP_URL = RESIDE;
+    const html = withClickTracking('<a href="https://onecardiff.ca/p">x</a>', "msg-1");
+    expect(html).not.toContain("/api/track/click");
   });
 });
 
