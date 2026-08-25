@@ -243,6 +243,35 @@ describe("withClickTracking, on the tenant's own host", () => {
   });
 });
 
+/** The cross-repo seam: reside gates on a token shape it cannot verify. */
+describe("the token reside receives", () => {
+  it("passes reside's shape gate and verifies here", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://canoe.test";
+    process.env.CHAT_SESSION_SECRET = "test-secret";
+
+    const html = withClickTracking(
+      '<a href="https://onecardiff.ca/member/notices/abc?a=1">Read</a>',
+      "msg-1",
+      "https://onecardiff.ca",
+    );
+
+    // Exactly what a browser hands reside: the attribute, entity-decoded by
+    // the HTML parser, then read back through URLSearchParams.
+    const href = /href="([^"]+)"/.exec(html)![1].replace(/&amp;/g, "&");
+    const token = new URL(href).searchParams.get("ccm")!;
+
+    // Copied from reside apps/web/src/app/api/track/click-beacon/route.ts.
+    const TOKEN_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+    expect(TOKEN_SHAPE.test(token)).toBe(true);
+    expect(token.length).toBeLessThan(4096);
+
+    expect(verifyEmailClickToken(token)).toMatchObject({
+      messageId: "msg-1",
+      url: "https://onecardiff.ca/member/notices/abc?a=1",
+    });
+  });
+});
+
 describe("the click token", () => {
   /**
    * The security property this whole design exists for.
