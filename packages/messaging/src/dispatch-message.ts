@@ -5,7 +5,11 @@ import { sendTenantReplyEmail } from "./email/tenant-reply";
 import { resolveMailFrom } from "./email/from";
 import { createEmailOpenToken } from "./email/open-tracking-token";
 import { withClickTracking } from "./email/click-tracking";
-import { fetchEmailAttachments, type EmailAttachmentRef } from "./email/attachments";
+import {
+  fetchEmailAttachments,
+  type AttachmentFetchCache,
+  type EmailAttachmentRef,
+} from "./email/attachments";
 
 function withOpenTrackingPixel(html: string, messageId: string): string {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
@@ -58,9 +62,16 @@ export async function dispatchOutboundMessage(params: {
    * message row, same reasoning as `from`: a retry re-derives it from
    * whatever reside sends on that attempt. Ignored for SMS. */
   attachments?: EmailAttachmentRef[];
+  /** Optional caller-owned memo for the fetch above (see
+   * AttachmentFetchCache). The bulk worker passes one per drain pass so a
+   * notice's PDF is fetched once rather than once per recipient - which is
+   * also what keeps reside's 30-minute signature window a constraint on when
+   * the batch STARTS draining rather than on how long it takes. The
+   * single-send path passes none. */
+  attachmentCache?: AttachmentFetchCache;
 }): Promise<Message> {
   const domain = createDomainService();
-  const { tenant, message, to, from, attachments } = params;
+  const { tenant, message, to, from, attachments, attachmentCache } = params;
 
   try {
     if (message.channel === "sms") {
@@ -94,7 +105,7 @@ export async function dispatchOutboundMessage(params: {
       // attachment must never block the email itself (fetchEmailAttachments
       // drops and logs rather than throwing), and there's no reason to pay
       // the fetch cost on the sms branch above.
-      const fetchedAttachments = await fetchEmailAttachments(attachments);
+      const fetchedAttachments = await fetchEmailAttachments(attachments, attachmentCache);
       const result = await sendTenantReplyEmail({
         to,
         subject: message.subject ?? "",

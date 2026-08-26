@@ -20,10 +20,16 @@ export type {
 } from "./email/click-tracking-token";
 export { withClickTracking } from "./email/click-tracking";
 export {
+  attachmentSignatureExpiredSecondsAgo,
+  createAttachmentFetchCache,
   fetchEmailAttachments,
   isAllowedAttachmentUrl,
   MAX_ATTACHMENTS_PER_MESSAGE,
 } from "./email/attachments";
-export type { EmailAttachmentRef, FetchedEmailAttachment } from "./email/attachments";
+export type {
+  AttachmentFetchCache,
+  EmailAttachmentRef,
+  FetchedEmailAttachment,
+} from "./email/attachments";
 
 export { dispatchOutboundMessage } from "./dispatch-message";

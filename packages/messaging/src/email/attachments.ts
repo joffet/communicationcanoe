@@ -39,6 +39,12 @@ const MAX_TOTAL_ATTACHMENT_BYTES = 9 * 1024 * 1024;
 
 const FETCH_TIMEOUT_MS = 15_000;
 
+/** Slack on the expiry check below, to absorb clock drift between this
+ * service and reside's. Only this side's check is skipped early; reside still
+ * enforces the real deadline, so being generous here costs a wasted 404 at
+ * worst and never lets a lapsed link through. */
+const SIGNATURE_CLOCK_SKEW_SECONDS = 60;
+
 /** reside's own app - the same host comm-canoe already calls back into.
  * Resolved fresh per call rather than cached at module load so tests can set
  * the env var first. */
@@ -93,6 +99,65 @@ export function isAllowedAttachmentUrl(url: string): boolean {
   return resolveAttachmentUrl(url) !== null;
 }
 
+/**
+ * How long ago this URL's signature lapsed, or null if it has not (or if the
+ * URL carries no deadline to read).
+ *
+ * reside signs these links with a 30-minute HMAC and puts the deadline in
+ * `exp`, unix seconds - see its lib/reservations/agreementPdfUrl.ts. Reading
+ * `exp` needs no secret, and reading it is worth doing: reside's route
+ * answers 404 identically for a bad key, a forged signature and a merely
+ * lapsed one, so without this a batch that outlived its signatures looks
+ * exactly like a misconfigured path. It is a DIAGNOSTIC, not a second gate -
+ * reside owns the verification, and a URL with no `exp` is passed straight
+ * through rather than refused.
+ *
+ * This matters for the bulk path specifically: a single send resolves inside
+ * the same request that minted the URL, a batch is drained later. See the
+ * per-batch fetch in the outbound-batch worker for what keeps that gap from
+ * growing with recipient count.
+ */
+export function attachmentSignatureExpiredSecondsAgo(
+  url: string,
+  nowMs: number = Date.now(),
+): number | null {
+  let exp: string | null;
+  try {
+    exp = new URL(url).searchParams.get("exp");
+  } catch {
+    return null;
+  }
+  if (!exp) return null;
+
+  const expiresAt = Number(exp);
+  if (!Number.isFinite(expiresAt)) return null;
+
+  const lapsedFor = Math.floor(nowMs / 1000) - expiresAt;
+  return lapsedFor > SIGNATURE_CLOCK_SKEW_SECONDS ? lapsedFor : null;
+}
+
+/**
+ * Memoises fetched bytes by resolved URL, so one file referenced by many
+ * messages is fetched once. Owned and scoped by the CALLER rather than being
+ * a module-level cache: the outbound-batch worker wants one per drain pass
+ * (hundreds of recipients, one PDF), and a process-lifetime cache holding
+ * megabytes of a resident's personal document is not something to leave
+ * running by default. The single-send path passes none and behaves exactly as
+ * it did.
+ *
+ * The PROMISE is cached, not the result - with several recipients dispatching
+ * at once, caching the resolved value lets every one of them miss and fetch
+ * before the first finishes writing it back. A dropped attachment (null) is
+ * cached too: a refused URL refused once is refused for the whole pass, and
+ * re-asking reside several hundred times would only turn one problem into a
+ * second one.
+ */
+export type AttachmentFetchCache = Map<string, Promise<FetchedEmailAttachment | null>>;
+
+export function createAttachmentFetchCache(): AttachmentFetchCache {
+  return new Map();
+}
+
 async function fetchOneAttachment(ref: EmailAttachmentRef): Promise<FetchedEmailAttachment | null> {
   if (ref.contentType !== "application/pdf") {
     console.error(`[email-attachments] rejected non-pdf contentType "${ref.contentType}" for ${ref.filename}`);
@@ -101,6 +166,14 @@ async function fetchOneAttachment(ref: EmailAttachmentRef): Promise<FetchedEmail
   const fetchUrl = resolveAttachmentUrl(ref.url);
   if (!fetchUrl) {
     console.error(`[email-attachments] refused attachment URL: ${ref.url}`);
+    return null;
+  }
+
+  const lapsedFor = attachmentSignatureExpiredSecondsAgo(fetchUrl);
+  if (lapsedFor !== null) {
+    console.error(
+      `[email-attachments] signature for ${ref.filename} lapsed ${lapsedFor}s ago - reside mints these for 30 minutes at POST time, so this send is running long after the request that queued it. Dropping the attachment; the email still goes.`,
+    );
     return null;
   }
 
@@ -146,6 +219,10 @@ async function fetchOneAttachment(ref: EmailAttachmentRef): Promise<FetchedEmail
  */
 export async function fetchEmailAttachments(
   refs: EmailAttachmentRef[] | undefined,
+  /** Optional, caller-owned memo - see AttachmentFetchCache. The size budget
+   * below is still applied per message, since the cap is on what one email
+   * may carry, not on what was fetched. */
+  cache?: AttachmentFetchCache,
 ): Promise<FetchedEmailAttachment[]> {
   if (!refs || refs.length === 0) return [];
 
@@ -154,7 +231,7 @@ export async function fetchEmailAttachments(
   let totalBytes = 0;
 
   for (const ref of capped) {
-    const attachment = await fetchOneAttachment(ref);
+    const attachment = await fetchOneAttachmentCached(ref, cache);
     if (!attachment) continue;
     if (totalBytes + attachment.content.byteLength > MAX_TOTAL_ATTACHMENT_BYTES) {
       console.error(
@@ -167,4 +244,31 @@ export async function fetchEmailAttachments(
   }
 
   return fetched;
+}
+
+async function fetchOneAttachmentCached(
+  ref: EmailAttachmentRef,
+  cache: AttachmentFetchCache | undefined,
+): Promise<FetchedEmailAttachment | null> {
+  if (!cache) return fetchOneAttachment(ref);
+
+  // Keyed by the RESOLVED URL, not the caller's: resolveAttachmentUrl is what
+  // decides which bytes are actually fetched, and two callers naming the same
+  // file on different hosts are one fetch. A ref that resolves to null is not
+  // cacheable by URL, so it falls through and is refused again - cheap, since
+  // refusing it never touches the network.
+  const key = resolveAttachmentUrl(ref.url);
+  if (!key) return fetchOneAttachment(ref);
+
+  let pending = cache.get(key);
+  if (!pending) {
+    pending = fetchOneAttachment(ref);
+    cache.set(key, pending);
+  }
+
+  const hit = await pending;
+  if (!hit) return null;
+  // The bytes are shared; the filename is this ref's own. Same URL under a
+  // different display name is one fetch, two attachments.
+  return hit.filename === ref.filename ? hit : { ...hit, filename: ref.filename };
 }
