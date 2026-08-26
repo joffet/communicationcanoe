@@ -19,5 +19,11 @@ export type {
   EmailClickTokenReading,
 } from "./email/click-tracking-token";
 export { withClickTracking } from "./email/click-tracking";
+export {
+  fetchEmailAttachments,
+  isAllowedAttachmentUrl,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+} from "./email/attachments";
+export type { EmailAttachmentRef, FetchedEmailAttachment } from "./email/attachments";
 
 export { dispatchOutboundMessage } from "./dispatch-message";

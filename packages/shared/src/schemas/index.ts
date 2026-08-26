@@ -134,6 +134,23 @@ export const resideSendMessageInputSchema = z
      * the From stays the tenant's inbound reply address, which is what every
      * send used before. Ignored for SMS. */
     from: z.string().min(3).max(320).optional(),
+    /** Files to MIME-attach to this email - references only (filename +
+     * contentType + a URL comm-canoe fetches server-side), never bytes. See
+     * packages/messaging/src/email/attachments.ts for the fetch-time
+     * validation (origin allowlist, size caps) this schema's bounds pair
+     * with. Ignored for SMS. Capped at 5 - matches
+     * MAX_ATTACHMENTS_PER_MESSAGE; a request over that limit is rejected
+     * here rather than silently truncated. */
+    attachments: z
+      .array(
+        z.object({
+          filename: z.string().min(1).max(255),
+          contentType: z.literal("application/pdf"),
+          url: z.string().url(),
+        }),
+      )
+      .max(5)
+      .optional(),
   })
   .refine((data) => Boolean(data.identity.phone || data.identity.email), {
     message: "identity requires at least one of phone or email",
