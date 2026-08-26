@@ -1,0 +1,94 @@
+#!/bin/sh
+#
+# Typecheck, tests, and build before a push.
+#
+# The build is the point of this hook. comm-canoe web's production deploy
+# failed on four consecutive merges to main over about twenty hours - #31,
+# #32, #35, #34 - and nothing said so: Railway keeps the last good deploy
+# serving, so every dashboard read "deployed" while main drifted four commits
+# ahead of what was actually running. #36 was the fix.
+#
+# Typecheck and tests passed on every one of those commits. They could not
+# have caught it: the failure was a client component reaching a server-only
+# module, so the Postgres driver landed in a browser bundle and Turbopack
+# could not resolve `dns`. Only a real build resolves modules per bundle, and
+# nothing in this repo ran one.
+#
+# This is NOT CI, and must not be treated as one:
+#
+#   - It cannot gate a merge. `--no-verify` skips it, the GitHub merge button
+#     does not consult it, and several sessions work in this repo at once.
+#   - It runs against whatever node_modules is on disk, where a clean room
+#     installs from the lockfile. A lockfile change does nothing here until
+#     the store is refetched, so this can pass on a tree CI would fail.
+#
+# Set PREPUSH_SKIP=1 to skip deliberately (a WIP push to a draft PR, say)
+# rather than reaching for --no-verify, which also disables everything else.
+
+set -e
+
+if [ -n "$PREPUSH_SKIP" ]; then
+  echo "pre-push: skipped (PREPUSH_SKIP set)"
+  exit 0
+fi
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+# A branch delete (`git push origin :branch`) pushes the null sha and has no
+# tree to check.
+ALL_DELETES=1
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  case "$local_sha" in
+    0000000000000000000000000000000000000000) ;;
+    "") ;;
+    *) ALL_DELETES=0 ;;
+  esac
+done
+[ "$ALL_DELETES" -eq 1 ] && exit 0
+
+# node resolves node_modules by walking up the directory tree, so a checkout
+# that was never installed does not fail - it silently borrows a parent
+# directory's modules and checks this tree's source against another tree's
+# dependency graph. Resolve the runner and require it to come from here.
+# Testing for a node_modules directory is not enough: an empty one passes that
+# and still resolves upward.
+RUNNER=$(node -e 'try{process.stdout.write(require.resolve("turbo/package.json"))}catch(e){}' 2>/dev/null || true)
+case "$RUNNER" in
+  "$ROOT"/*) ;;
+  "")
+    echo "pre-push: cannot resolve turbo from $ROOT - run \`pnpm install\`." >&2
+    echo "pre-push: refusing to pass a check that did not run. PREPUSH_SKIP=1 to override." >&2
+    exit 1
+    ;;
+  *)
+    echo "pre-push: turbo resolves to $RUNNER, which is outside $ROOT." >&2
+    echo "pre-push: this checkout is borrowing another tree's node_modules - any check here" >&2
+    echo "pre-push: would pass against the wrong dependency graph. Run \`pnpm install\`." >&2
+    exit 1
+    ;;
+esac
+
+echo "pre-push: typecheck + tests + build in $ROOT (~30s; PREPUSH_SKIP=1 to skip)"
+
+# --force, not the cached result. turbo replays a pass whose inputs hash the
+# same, and its hash cannot see which physical node_modules produced it - so a
+# run made in a borrowed-node_modules checkout (the case rejected above) can
+# satisfy a later gate. A gate must not inherit a result computed in a state
+# the gate itself would refuse.
+pnpm typecheck --force
+pnpm test --force
+
+# Builds into .next, the same directory a dev server uses. That is deliberate
+# rather than careless: next holds .next/lock for the duration, so a build
+# started while a dev server is up refuses with "Another next build process is
+# already running" instead of corrupting anything. Stop the server, or
+# PREPUSH_SKIP=1.
+#
+# The alternative - building into a scratch distDir - was tried and is worse:
+# next rewrites apps/web/tsconfig.json to add that directory's generated types
+# to `include`, so every push would leave a tracked file modified in a
+# checkout several sessions share.
+pnpm build --force
+
+echo "pre-push: passed (typecheck, tests, build)."

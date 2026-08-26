@@ -9,7 +9,8 @@
     "test": "turbo test",
     "db:generate": "pnpm --filter @communication-canoe/database db:generate",
     "db:migrate": "pnpm --filter @communication-canoe/database db:migrate",
-    "db:studio": "pnpm --filter @communication-canoe/database db:studio"
+    "db:studio": "pnpm --filter @communication-canoe/database db:studio",
+    "prepare": "node scripts/install-git-hooks.mjs"
   },
   "devDependencies": {
     "turbo": "^2.5.4",
