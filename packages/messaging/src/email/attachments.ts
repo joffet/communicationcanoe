@@ -39,10 +39,10 @@ const MAX_TOTAL_ATTACHMENT_BYTES = 9 * 1024 * 1024;
 
 const FETCH_TIMEOUT_MS = 15_000;
 
-/** The one origin attachment URLs may be fetched from - reside's own app, the
- * same host comm-canoe already calls back into. Resolved fresh per call
- * rather than cached at module load so tests can set the env var first. */
-function allowedAttachmentOrigin(): string | null {
+/** reside's own app - the same host comm-canoe already calls back into.
+ * Resolved fresh per call rather than cached at module load so tests can set
+ * the env var first. */
+function resideOrigin(): string | null {
   const base = process.env.RESIDE_API_BASE;
   if (!base) return null;
   try {
@@ -52,16 +52,45 @@ function allowedAttachmentOrigin(): string | null {
   }
 }
 
-export function isAllowedAttachmentUrl(url: string): boolean {
-  const allowedOrigin = allowedAttachmentOrigin();
-  if (!allowedOrigin) return false;
+/**
+ * The URL to fetch for an attachment, always on reside's own origin.
+ *
+ * The caller's host is DISCARDED rather than validated. Only the path and
+ * query survive, resolved against RESIDE_API_BASE - so a caller cannot point
+ * this at anything, and there is no origin left to get wrong.
+ *
+ * It used to compare origins and refuse a mismatch. That was correct and it
+ * worked, which was the problem: reside builds these URLs from BETTER_AUTH_URL
+ * (`http://onecardiff.ca`) while comm-canoe is configured with
+ * `https://api.resideplatform.co`. Two aliases of one deployment, two
+ * different origins, every agreement PDF refused - and silently, because a
+ * rejected attachment is dropped so it cannot cost a resident their email.
+ * Re-aligning those strings would have left the same trap set for the next
+ * host or scheme that drifts.
+ *
+ * Keeping the path on an expected prefix is defence in depth: this endpoint
+ * only ever serves reside's signed attachment route, and reside verifies the
+ * signature itself.
+ */
+const ATTACHMENT_PATH_PREFIX = "/api/reservations/agreement-pdf/";
+
+export function resolveAttachmentUrl(url: string): string | null {
+  const origin = resideOrigin();
+  if (!origin) return null;
   try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-    return parsed.origin === allowedOrigin;
+    // A relative path resolves against the base; an absolute URL has its own
+    // origin replaced by it. Either way the result is on reside's origin.
+    const supplied = new URL(url, origin);
+    if (!supplied.pathname.startsWith(ATTACHMENT_PATH_PREFIX)) return null;
+    return `${origin}${supplied.pathname}${supplied.search}`;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Retained for callers that only need the yes/no. */
+export function isAllowedAttachmentUrl(url: string): boolean {
+  return resolveAttachmentUrl(url) !== null;
 }
 
 async function fetchOneAttachment(ref: EmailAttachmentRef): Promise<FetchedEmailAttachment | null> {
@@ -69,15 +98,16 @@ async function fetchOneAttachment(ref: EmailAttachmentRef): Promise<FetchedEmail
     console.error(`[email-attachments] rejected non-pdf contentType "${ref.contentType}" for ${ref.filename}`);
     return null;
   }
-  if (!isAllowedAttachmentUrl(ref.url)) {
-    console.error(`[email-attachments] rejected attachment URL outside the allowed origin: ${ref.url}`);
+  const fetchUrl = resolveAttachmentUrl(ref.url);
+  if (!fetchUrl) {
+    console.error(`[email-attachments] refused attachment URL: ${ref.url}`);
     return null;
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(ref.url, { signal: controller.signal });
+    const response = await fetch(fetchUrl, { signal: controller.signal });
     if (!response.ok) {
       console.error(`[email-attachments] fetch failed (${response.status}) for ${ref.url}`);
       return null;
