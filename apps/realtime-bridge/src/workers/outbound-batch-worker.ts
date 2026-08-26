@@ -1,6 +1,10 @@
 import { createAdminService, createDomainService } from "@communication-canoe/database";
 import type { AdminService, DomainService } from "@communication-canoe/database";
-import { dispatchOutboundMessage } from "@communication-canoe/messaging";
+import {
+  createAttachmentFetchCache,
+  dispatchOutboundMessage,
+  type AttachmentFetchCache,
+} from "@communication-canoe/messaging";
 
 const POLL_INTERVAL_MS = 7_000;
 
@@ -96,6 +100,25 @@ async function mapWithConcurrency<T>(
 type Caches = {
   tenants: Map<string, Promise<Awaited<ReturnType<AdminService["getTenantById"]>>>>;
   batches: Map<string, Promise<Awaited<ReturnType<DomainService["getOutboundBatch"]>>>>;
+  /**
+   * Attachment bytes, shared across every recipient in this pass.
+   *
+   * Not just a saving (a thousand-recipient notice would otherwise pull the
+   * same PDF a thousand times, from reside, while reside is serving
+   * residents) - it is what makes reside's short-lived signature workable
+   * here. Those URLs carry a 30-minute HMAC minted when reside POSTed the
+   * batch (its lib/reservations/agreementPdfUrl.ts). Fetching per recipient
+   * would put the LAST recipient of a long batch outside that window; fetching
+   * once per pass puts only the FIRST inside it, and the first is reached
+   * within a poll interval of the batch being queued.
+   *
+   * Lives exactly as long as the `Caches` object - one drain pass - so the
+   * bytes of a resident's personal document are not held in memory by a
+   * process-lifetime cache. Bounded by the distinct attachments across the
+   * batches touched in one pass, each already capped at
+   * MAX_TOTAL_ATTACHMENT_BYTES (9MB) by fetchEmailAttachments.
+   */
+  attachments: AttachmentFetchCache;
 };
 
 async function drainPendingRecipients(): Promise<void> {
@@ -115,7 +138,11 @@ async function drainPendingRecipients(): Promise<void> {
   // cached, not the result: with several recipients in flight at once, caching
   // the resolved value lets every one of them miss and fetch before the first
   // finishes writing it back.
-  const caches: Caches = { tenants: new Map(), batches: new Map() };
+  const caches: Caches = {
+    tenants: new Map(),
+    batches: new Map(),
+    attachments: createAttachmentFetchCache(),
+  };
 
   for (let round = 0; round < MAX_ROUNDS_PER_TICK; round++) {
     const recipients = await domain.listPendingOutboundBatchRecipients(BATCH_LIMIT);
@@ -213,6 +240,13 @@ async function processRecipient(
       message,
       to,
       from: batch?.fromAddress ?? undefined,
+      // Read off the batch for the same reason the From is: one notice, one
+      // building, one set of files. These are references exactly as reside
+      // sent them - resolveAttachmentUrl and the fetch run inside dispatch,
+      // on the same code path the single send uses, and a refused, expired or
+      // oversized attachment is dropped there rather than failing this send.
+      attachments: batch?.attachments ?? undefined,
+      attachmentCache: caches.attachments,
     });
 
     await domain.updateOutboundBatchRecipientStatus(recipient.id, {

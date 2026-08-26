@@ -206,3 +206,71 @@ describe("createOutboundBatch's From", () => {
     expect((await domain.getOutboundBatch(batch.id))?.fromAddress).toBeNull();
   });
 });
+
+/**
+ * What reside sends is what the batch row keeps.
+ *
+ * The `url` here carries reside's `exp`/`sig` - a 30-minute HMAC over the S3
+ * key (its lib/reservations/agreementPdfUrl.ts). The batch row must hold the
+ * caller's reference exactly, not something this side resolved: resolving at
+ * enqueue time would pin a fetch target into a row the worker drains later,
+ * and put a second copy of resolveAttachmentUrl's decision in the database
+ * where nothing can revise it.
+ */
+describe("createOutboundBatch attachments", () => {
+  const ATTACHMENT = {
+    filename: "agreement.pdf",
+    contentType: "application/pdf" as const,
+    url: "http://onecardiff.ca/api/reservations/agreement-pdf/reservation-agreement-pdfs/cardiff/r-1.pdf?exp=1787601713&sig=abc",
+  };
+
+  async function create(
+    tenantId: TenantId,
+    attachments?: { filename: string; contentType: "application/pdf"; url: string }[],
+  ) {
+    return domain.createOutboundBatch({
+      tenantId,
+      channel: "email",
+      subject: "Notice",
+      body: "hello",
+      recipients: [{ email: "someone@example.test" }],
+      attachments,
+    });
+  }
+
+  it("round-trips the reference verbatim, host and signature included", async () => {
+    const tenant = await makeTenant("1");
+
+    const created = await create(tenant.id, [ATTACHMENT]);
+    const read = await domain.getOutboundBatch(created.id);
+
+    // Verbatim: the caller's host survives (resolveAttachmentUrl discards it
+    // at FETCH time, which is a different moment and a different layer), and
+    // so does the query string the signature lives in.
+    expect(read?.attachments).toEqual([ATTACHMENT]);
+  });
+
+  it("stores null for a batch with nothing attached - Notices, today", async () => {
+    const tenant = await makeTenant("1");
+
+    const withNothing = await create(tenant.id);
+    const withEmpty = await create(tenant.id, []);
+    // The control. `null` on its own would pass just as well against a build
+    // where the column is never written at all.
+    const withOne = await create(tenant.id, [ATTACHMENT]);
+
+    expect((await domain.getOutboundBatch(withNothing.id))?.attachments).toBeNull();
+    expect((await domain.getOutboundBatch(withEmpty.id))?.attachments).toBeNull();
+    expect((await domain.getOutboundBatch(withOne.id))?.attachments).toEqual([ATTACHMENT]);
+  });
+
+  it("keeps each batch's attachments to itself", async () => {
+    const tenant = await makeTenant("1");
+
+    const notice = await create(tenant.id);
+    const agreement = await create(tenant.id, [ATTACHMENT]);
+
+    expect((await domain.getOutboundBatch(notice.id))?.attachments).toBeNull();
+    expect((await domain.getOutboundBatch(agreement.id))?.attachments).toEqual([ATTACHMENT]);
+  });
+});

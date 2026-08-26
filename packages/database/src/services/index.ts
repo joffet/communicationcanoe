@@ -64,6 +64,7 @@ import type {
   TenantSettings,
 } from "../types";
 import type { TenantId } from "@communication-canoe/shared/brands";
+import type { ResideMessageAttachment } from "@communication-canoe/shared/schemas";
 
 /** Strips repeated Re:/Fwd:/FW: prefixes and normalizes whitespace/case, so
  * "Re: Fwd: Parking permit" and "parking permit" compare equal. No existing
@@ -755,6 +756,10 @@ export class DomainService {
     recipients: IdentityContact[];
     /** Overrides the tenant's From for every email in this batch. */
     from?: string;
+    /** Attachment references for every email in this batch, stored verbatim -
+     * see outboundBatches.attachments. Nothing is resolved or fetched here;
+     * that happens in the worker, at send time. */
+    attachments?: ResideMessageAttachment[];
   }): Promise<OutboundBatch> {
     // One transaction: a batch row claiming N recipients, with no recipient
     // rows behind it, would leave the worker reporting a batch that can never
@@ -767,6 +772,9 @@ export class DomainService {
           channel: input.channel,
           subject: input.subject ?? null,
           fromAddress: input.from ?? null,
+          // Normalised to null rather than an empty array so "this batch has
+          // no attachments" is one value in the column, not two.
+          attachments: input.attachments?.length ? input.attachments : null,
           totalRecipients: input.recipients.length,
         })
         .returning();

@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isAllowedAttachmentUrl, resolveAttachmentUrl } from "./attachments";
+import {
+  attachmentSignatureExpiredSecondsAgo,
+  isAllowedAttachmentUrl,
+  resolveAttachmentUrl,
+} from "./attachments";
 
 /**
  * isAllowedAttachmentUrl is the whole SSRF defense for the attachment-fetch
@@ -113,5 +117,38 @@ describe("resolveAttachmentUrl", () => {
   it("fails closed when RESIDE_API_BASE is unset", () => {
     delete process.env.RESIDE_API_BASE;
     expect(resolveAttachmentUrl(`https://api.resideplatform.co${PATH}`)).toBeNull();
+  });
+});
+
+/**
+ * The bulk path's problem, in isolation. reside mints these links at POST time
+ * and they last 30 minutes; a single send resolves inside that same request,
+ * a batch is drained later. This read is what turns "the batch outlived its
+ * signatures" into a named cause - reside's route answers 404 identically for
+ * a bad key, a forged signature and a lapsed one.
+ */
+describe("attachmentSignatureExpiredSecondsAgo", () => {
+  const NOW_MS = 1_800_000_000_000;
+  const NOW_S = Math.floor(NOW_MS / 1000);
+  const url = (query: string) =>
+    `https://api.resideplatform.co/api/reservations/agreement-pdf/x/r-1.pdf?${query}`;
+
+  it("reports how long ago a lapsed signature expired", () => {
+    expect(attachmentSignatureExpiredSecondsAgo(url(`exp=${NOW_S - 3600}&sig=x`), NOW_MS)).toBe(3600);
+  });
+
+  it("says nothing about a signature still inside its window", () => {
+    expect(attachmentSignatureExpiredSecondsAgo(url(`exp=${NOW_S + 60}&sig=x`), NOW_MS)).toBeNull();
+  });
+
+  it("tolerates a minute of clock drift rather than dropping a link reside would honour", () => {
+    expect(attachmentSignatureExpiredSecondsAgo(url(`exp=${NOW_S - 30}&sig=x`), NOW_MS)).toBeNull();
+    expect(attachmentSignatureExpiredSecondsAgo(url(`exp=${NOW_S - 90}&sig=x`), NOW_MS)).toBe(90);
+  });
+
+  it("passes through a URL with no deadline to read - this is a diagnostic, not a gate", () => {
+    expect(attachmentSignatureExpiredSecondsAgo(url("sig=x"), NOW_MS)).toBeNull();
+    expect(attachmentSignatureExpiredSecondsAgo(url("exp=soon&sig=x"), NOW_MS)).toBeNull();
+    expect(attachmentSignatureExpiredSecondsAgo("not a url", NOW_MS)).toBeNull();
   });
 });

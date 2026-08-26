@@ -63,6 +63,7 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import type { ResideClientUid, TenantId } from "@communication-canoe/shared/brands";
+import type { ResideMessageAttachment } from "@communication-canoe/shared/schemas";
 
 /**
  * Everything below lives in `public`, inside comm-canoe's own logical database
@@ -757,6 +758,26 @@ export const outboundBatches = pgTable("outbound_batches", {
    * and a per-recipient From is only a way to get them out of step. Null keeps
    * the tenant's inbound reply address, which is what every batch did before. */
   fromAddress: text("from_address"),
+  /** Attachment REFERENCES for every email in this batch, exactly as reside
+   * sent them ({filename, contentType, url}) - never bytes, and never
+   * anything this side resolved. resolveAttachmentUrl/fetchEmailAttachments
+   * run in the worker at send time, on the same code path the single send
+   * uses; storing a resolved URL here would pin a fetch target at enqueue
+   * time and put a second copy of that decision in the database.
+   *
+   * On the batch rather than the recipient for the same reason from_address
+   * is: one notice, one building, one set of files. Null for every batch
+   * Notices sends, which has nothing to attach.
+   *
+   * EXPIRY: the `url` carries reside's 30-minute HMAC (its
+   * lib/reservations/agreementPdfUrl.ts). That window covers the batch's
+   * FIRST drain, not its last - see the per-batch fetch in
+   * apps/realtime-bridge/src/workers/outbound-batch-worker.ts, which resolves
+   * the bytes once and reuses them across every recipient so the deadline
+   * does not scale with recipient count. A batch whose signatures lapse
+   * before it is first drained drops its attachments loudly (attachments.ts
+   * names the expiry) and still sends the email. */
+  attachments: jsonb("attachments").$type<ResideMessageAttachment[]>(),
   status: text("status")
     .notNull()
     .default("pending"),

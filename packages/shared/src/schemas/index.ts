@@ -177,6 +177,27 @@ export const resideSendBulkMessageInputSchema = z
      * From stays the tenant's inbound reply address, which is what every bulk
      * send did before. Ignored for SMS. */
     from: z.string().min(3).max(320).optional(),
+    /** Files to MIME-attach to every email in this batch - references only,
+     * never bytes, exactly as resideSendMessageInputSchema.attachments above,
+     * and capped at the same 5 (MAX_ATTACHMENTS_PER_MESSAGE).
+     *
+     * Batch-level rather than per-recipient for the same reason `from` is: a
+     * bulk send is one notice from one building, and a per-recipient
+     * attachment list is only a way to get them out of step. Ignored for SMS.
+     *
+     * What arrives here is stored on the batch row untouched and resolved at
+     * drain time - see createOutboundBatch and the expiry note on
+     * outboundBatches.attachments. */
+    attachments: z
+      .array(
+        z.object({
+          filename: z.string().min(1).max(255),
+          contentType: z.literal("application/pdf"),
+          url: z.string().url(),
+        }),
+      )
+      .max(5)
+      .optional(),
   })
   .refine((data) => data.recipients.every((r) => Boolean(r.phone || r.email)), {
     message: "every recipient requires at least one of phone or email",
@@ -344,6 +365,12 @@ export type ConvertIdentityInput = z.infer<typeof convertIdentityInputSchema>;
 export type LogLiveTransferInput = z.infer<typeof logLiveTransferInputSchema>;
 export type ConversationFilters = z.infer<typeof conversationFiltersSchema>;
 export type ProvisionTenantInput = z.infer<typeof provisionTenantInputSchema>;
+/** One attachment reference as reside puts it on the wire - the element type
+ * shared by resideSendMessageInputSchema and resideSendBulkMessageInputSchema,
+ * and the shape persisted on outboundBatches.attachments. */
+export type ResideMessageAttachment = NonNullable<
+  z.infer<typeof resideSendMessageInputSchema>["attachments"]
+>[number];
 export type ResideSendMessageInput = z.infer<typeof resideSendMessageInputSchema>;
 export type ResideSendBulkMessageInput = z.infer<typeof resideSendBulkMessageInputSchema>;
 export type ResideCreateKnowledgeDocumentInput = z.infer<typeof resideCreateKnowledgeDocumentInputSchema>;
