@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isAllowedAttachmentUrl } from "./attachments";
+import { isAllowedAttachmentUrl, resolveAttachmentUrl } from "./attachments";
 
 /**
  * isAllowedAttachmentUrl is the whole SSRF defense for the attachment-fetch
@@ -26,8 +26,13 @@ afterEach(() => {
 
 describe("isAllowedAttachmentUrl", () => {
   it("allows a URL on the same origin as RESIDE_API_BASE", () => {
+    // The path matters now as well as the origin: this fixture used to say
+    // /api/images/..., the public proxy reside served these from before they
+    // moved behind their own signed route. It never matched a real URL.
     expect(
-      isAllowedAttachmentUrl("https://app.reside.example/api/images/reservation-agreement-pdfs/cardiff/r1.pdf"),
+      isAllowedAttachmentUrl(
+        "https://app.reside.example/api/reservations/agreement-pdf/reservation-agreement-pdfs/cardiff/r1.pdf",
+      ),
     ).toBe(true);
   });
 
@@ -65,5 +70,48 @@ describe("isAllowedAttachmentUrl", () => {
   it("fails closed when RESIDE_API_BASE itself is malformed", () => {
     process.env.RESIDE_API_BASE = "not a url";
     expect(isAllowedAttachmentUrl("https://app.reside.example/x.pdf")).toBe(false);
+  });
+});
+
+describe("resolveAttachmentUrl", () => {
+  const PATH = "/api/reservations/agreement-pdf/reservation-agreement-pdfs/cardiff/r-1.pdf?exp=1&sig=x";
+
+  beforeEach(() => {
+    process.env.RESIDE_API_BASE = "https://api.resideplatform.co";
+  });
+
+  it("rehosts a URL sent on a different alias of the same deployment", () => {
+    // The production failure: reside builds these from BETTER_AUTH_URL
+    // (http://onecardiff.ca) while this service is configured with
+    // api.resideplatform.co. Two aliases, two origins, every PDF refused.
+    expect(resolveAttachmentUrl(`http://onecardiff.ca${PATH}`)).toBe(
+      `https://api.resideplatform.co${PATH}`
+    );
+  });
+
+  it("accepts a bare path", () => {
+    expect(resolveAttachmentUrl(PATH)).toBe(`https://api.resideplatform.co${PATH}`);
+  });
+
+  it("cannot be pointed at another host", () => {
+    // The host is discarded, not validated - so this resolves onto reside's
+    // origin rather than being fetched from the attacker's.
+    expect(resolveAttachmentUrl(`https://evil.example${PATH}`)).toBe(
+      `https://api.resideplatform.co${PATH}`
+    );
+  });
+
+  it("refuses a path outside the attachment route", () => {
+    expect(resolveAttachmentUrl("https://api.resideplatform.co/api/admin/secrets")).toBeNull();
+    expect(resolveAttachmentUrl("/etc/passwd")).toBeNull();
+  });
+
+  it("refuses a path that escapes the prefix by traversal", () => {
+    expect(resolveAttachmentUrl("/api/reservations/agreement-pdf/../../admin/secrets")).toBeNull();
+  });
+
+  it("fails closed when RESIDE_API_BASE is unset", () => {
+    delete process.env.RESIDE_API_BASE;
+    expect(resolveAttachmentUrl(`https://api.resideplatform.co${PATH}`)).toBeNull();
   });
 });
