@@ -401,6 +401,24 @@ export const resideCreateKnowledgeDocumentInputSchema = z.object({
   uploadedBy: z.string().optional(),
 });
 
+// ---- Slice 7 of reside's member-profile-edit brief: correcting an
+// identity's contact details in place after a member changes their sign-in
+// email or phone. resideResidentId is the stable key the caller actually
+// has; old email/phone are a fallback for rows that predate the
+// reside_resident_id backfill (see findOrCreateIdentity).
+export const resideRenameIdentityInputSchema = z.object({
+  tenantId: z.string().min(1).transform(asResideClientUid),
+  resideResidentId: z.string().uuid(),
+  email: z
+    .object({ old: z.string().email(), new: z.string().email() })
+    .optional(),
+  // phone.new === null clears the phone (a resident removing their sign-in
+  // phone entirely); omitting the phone key altogether means "not changing".
+  phone: z
+    .object({ old: z.string(), new: z.string().nullable() })
+    .optional(),
+});
+
 export type ResideActorClaims = z.infer<typeof resideActorSchema>;
 export type ResideAddTagInput = z.infer<typeof resideAddTagInputSchema>;
 export type ResideAssigneeInput = z.infer<typeof resideAssigneeInputSchema>;
@@ -425,3 +443,4 @@ export type ResideMessageAttachment = NonNullable<
 export type ResideSendMessageInput = z.infer<typeof resideSendMessageInputSchema>;
 export type ResideSendBulkMessageInput = z.infer<typeof resideSendBulkMessageInputSchema>;
 export type ResideCreateKnowledgeDocumentInput = z.infer<typeof resideCreateKnowledgeDocumentInputSchema>;
+export type ResideRenameIdentityInput = z.infer<typeof resideRenameIdentityInputSchema>;

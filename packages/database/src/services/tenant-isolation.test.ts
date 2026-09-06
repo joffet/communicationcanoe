@@ -304,6 +304,17 @@ describe("writes cannot reach across the boundary", () => {
     expect(row.assignedTeamId).toBe(a.team.id);
     expect(row.tenantId).toBe(b.tenant.id);
   });
+
+  it("renameIdentity refuses to match another tenant's identity by old contact", async () => {
+    const outcome = await domain.renameIdentity(a.tenant.id, {
+      resideResidentId: "99999999-9999-9999-9999-999999999999",
+      email: { old: b.identity.email!, new: "renamed@example.test" },
+    });
+    expect(outcome).toBeNull();
+
+    const [row] = await db.select().from(identities).where(eq(identities.id, b.identity.id));
+    expect(row.email).toBe(b.identity.email);
+  });
 });
 
 /* ------------------------------------------------------------------ */
