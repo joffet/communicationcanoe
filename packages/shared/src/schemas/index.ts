@@ -121,6 +121,33 @@ export const resideSendMessageInputSchema = z
     body: z.string().min(1),
     subject: z.string().optional(),
     conversationId: z.string().uuid().optional(),
+    /**
+     * Where this message is meant to arrive.
+     *
+     * "channel" (the default, and what every existing caller gets by
+     * omitting this) delivers over `channel` - an email or a text - and
+     * records it in the thread on the way.
+     *
+     * "inbox" records it in the thread and delivers nothing. The message is
+     * still `visibility: "external"`, because that is what the member inbox
+     * reads; "internal" would hide it from the very person it is for. It is
+     * filed as channel `web_chat`, which is the existing name for a message
+     * that lives in the app rather than on a carrier, and as `delivered`,
+     * because it is already where it was going.
+     *
+     * reside's notification inbox uses this for "Send to my building inbox",
+     * which is explicitly the button that does not email you.
+     */
+    deliverTo: z.enum(["channel", "inbox"]).default("channel"),
+    /**
+     * Start a fresh thread rather than continuing whichever one is open.
+     *
+     * findOrCreateConversation otherwise resolves to the most recently active
+     * open conversation for the identity, which is right for a reply and
+     * wrong for "send me this as its own thread". Ignored when
+     * `conversationId` names a thread explicitly.
+     */
+    newConversation: z.boolean().optional(),
     /** Stable per logical message, reused across reside's retries. When a
      * message with this key already exists for the tenant the endpoint returns
      * it untouched instead of sending again - this is what makes reside's

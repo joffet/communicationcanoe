@@ -448,9 +448,23 @@ export class DomainService {
   async findOrCreateConversation(
     tenantId: TenantId,
     identityId: string,
-    context?: { channel?: string; subject?: string },
+    context?: { channel?: string; subject?: string; forceNew?: boolean },
   ): Promise<{ conversation: Conversation; isStale: boolean }> {
     const canonicalId = await this.resolveIdentityId(identityId);
+
+    // forceNew is for a caller that means "its own thread" rather than "the
+    // conversation with this person" - reside's "send this to my inbox", which
+    // would otherwise land in whatever unrelated thread happened to be open.
+    // Deliberately skips the candidate search entirely rather than filtering
+    // it: there is no such thing as a matching candidate here.
+    if (context?.forceNew) {
+      const [created] = await this.orm
+        .insert(conversationsTable)
+        .values({ tenantId, identityId: canonicalId, status: "open" })
+        .returning();
+      return { conversation: created, isStale: false };
+    }
+
     const identityChainIds = await this.getIdentityMergeChainIds(canonicalId);
 
     const openCandidates = await this.orm

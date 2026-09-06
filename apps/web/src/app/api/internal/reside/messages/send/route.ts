@@ -25,10 +25,16 @@ export async function POST(request: Request) {
     idempotencyKey,
     from,
     attachments,
+    deliverTo,
+    newConversation,
   } = parsed.data;
 
+  // An inbox message is not going anywhere, so it needs no destination. Every
+  // other send still does, and a missing one is still a 400 rather than a
+  // message that quietly lands nowhere.
+  const inboxOnly = deliverTo === "inbox";
   const to = channel === "sms" ? identity.phone : identity.email;
-  if (!to) {
+  if (!inboxOnly && !to) {
     return Response.json(
       { error: `identity.${channel === "sms" ? "phone" : "email"} is required for channel "${channel}"` },
       { status: 400 },
@@ -77,22 +83,55 @@ export async function POST(request: Request) {
     // Outbound/system-attributed send - no topic to classify, isStale is
     // irrelevant here (Phase 9's staleness check only matters for inbound
     // resident messages).
-    ({ conversation } = await domain.findOrCreateConversation(tenantId, resolvedIdentity.id, { channel }));
+    ({ conversation } = await domain.findOrCreateConversation(tenantId, resolvedIdentity.id, {
+      channel,
+      // "Send this to my inbox" means its own thread, not an addition to
+      // whatever conversation happens to be open with this person.
+      forceNew: newConversation === true,
+    }));
   }
 
   const message = await domain.appendMessage({
     tenantId,
     idempotencyKey,
     conversationId: conversation.id,
-    channel,
+    // web_chat is the existing name for a message that lives in the app rather
+    // than on a carrier. Recording an inbox message as "email" would make the
+    // thread claim an email was sent, and the delivery columns would be the
+    // only thing saying otherwise.
+    channel: inboxOnly ? "web_chat" : channel,
     direction: "outbound",
     senderType: "system",
     body,
     subject,
-    deliveryStatus: "queued",
-    // Reside-originated sends are always actually delivered to the resident.
+    // Nothing is queued for an inbox message - it is already where it was
+    // going, and "queued" would leave it looking permanently pending.
+    deliveryStatus: inboxOnly ? "delivered" : "queued",
+    // External even when nothing is delivered: "external" is what the member
+    // inbox reads, and "internal" would hide the message from the person it
+    // was written for.
     visibility: "external",
   });
+
+  if (inboxOnly) {
+    return Response.json({
+      message: {
+        id: message.id,
+        conversationId: message.conversationId,
+        deliveryStatus: message.deliveryStatus,
+        providerMessageId: null,
+        deliveryError: null,
+      },
+    });
+  }
+
+  if (!to) {
+    // Not reachable: a channel send without a destination was refused above,
+    // and an inbox send has already returned. Written as a guard rather than a
+    // non-null assertion so that if either of those changes, this fails
+    // loudly here instead of handing undefined to a carrier.
+    return Response.json({ error: "no destination for a channel send" }, { status: 400 });
+  }
 
   const sent = await dispatchOutboundMessage({ tenant, message, to, from, attachments });
 
