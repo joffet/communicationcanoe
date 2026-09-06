@@ -69,9 +69,14 @@ export async function dispatchOutboundMessage(params: {
    * the batch STARTS draining rather than on how long it takes. The
    * single-send path passes none. */
   attachmentCache?: AttachmentFetchCache;
+  /** Unsubscribe headers for the email path. Not persisted on the message row,
+   * same as `from` and `attachments`: reside re-derives them per attempt, and
+   * a retry replayed from its outbox - which has no column for them - simply
+   * sends without. Ignored for SMS. */
+  headers?: Record<string, string>;
 }): Promise<Message> {
   const domain = createDomainService();
-  const { tenant, message, to, from, attachments, attachmentCache } = params;
+  const { tenant, message, to, from, attachments, attachmentCache, headers } = params;
 
   try {
     if (message.channel === "sms") {
@@ -126,6 +131,7 @@ export async function dispatchOutboundMessage(params: {
         // notice bodies) as `body` - never plain text needing escaping.
         isHtml: true,
         attachments: fetchedAttachments.length > 0 ? fetchedAttachments : undefined,
+        headers,
       });
       return await domain.updateMessageDeliveryStatus(message.id, {
         deliveryStatus: "sent",

@@ -38,12 +38,23 @@ export async function sendSesEmail(options: {
    * attachments at all, so this branches the transport rather than always
    * paying the raw-MIME cost. */
   attachments?: FetchedEmailAttachment[];
+  /** Extra RFC 5322 headers. SendEmailCommand cannot express one at all, so
+   * any header at all forces the raw-MIME path below - the same branch
+   * attachments take, for the same reason. */
+  headers?: Record<string, string>;
 }): Promise<{ messageId?: string }> {
   const from = options.from ?? resolveMailFrom(options.tenant);
   const text = options.text ?? stripHtml(options.html);
 
-  if (options.attachments && options.attachments.length > 0) {
-    return sendRawSesEmail({ ...options, from, text, attachments: options.attachments });
+  const headers = options.headers && Object.keys(options.headers).length > 0 ? options.headers : undefined;
+  if ((options.attachments && options.attachments.length > 0) || headers) {
+    return sendRawSesEmail({
+      ...options,
+      from,
+      text,
+      attachments: options.attachments ?? [],
+      headers,
+    });
   }
 
   const result = await getSesClient().send(
@@ -69,7 +80,8 @@ export async function sendSesEmail(options: {
  * Same delivery as sendSesEmail's plain path (SES, same Source/Destination/
  * Subject/Body/ConfigurationSetName), but composed as a raw RFC 5322 message
  * and sent via SendRawEmailCommand - the only SES API that can carry a MIME
- * attachment. SendEmailCommand has no attachment parameter at all.
+ * attachment, or a custom header. SendEmailCommand has no parameter for
+ * either.
  *
  * The message is assembled by nodemailer's streamTransport with `buffer:
  * true`, which builds the exact bytes a real SMTP send would produce but
@@ -87,6 +99,7 @@ async function sendRawSesEmail(options: {
   replyTo?: string;
   configurationSetName?: string;
   attachments: FetchedEmailAttachment[];
+  headers?: Record<string, string>;
 }): Promise<{ messageId?: string }> {
   const transport = nodemailer.createTransport({ streamTransport: true, buffer: true, newline: "unix" });
   const built = await transport.sendMail({
@@ -96,6 +109,7 @@ async function sendRawSesEmail(options: {
     subject: options.subject,
     html: options.html,
     text: options.text,
+    ...(options.headers ? { headers: options.headers } : {}),
     attachments: options.attachments.map((attachment) => ({
       filename: attachment.filename,
       content: attachment.content,
