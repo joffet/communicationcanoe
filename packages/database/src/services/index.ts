@@ -5,6 +5,7 @@ import type {
   ConversationFilters,
   IdentityContact,
   LogLiveTransferInput,
+  ResideRenameIdentityInput,
 } from "@communication-canoe/shared";
 import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm";
 import { createDb, type Db } from "../db";
@@ -430,6 +431,92 @@ export class DomainService {
       if (byEmail) return this.getCanonicalIdentity(byEmail.id);
     }
     return null;
+  }
+
+  /**
+   * Slice 7 of reside's member-profile-edit brief: a member changed their
+   * sign-in email or phone, and the identity row comm-canoe matches
+   * conversations on (by contact, never by resideResidentId - see
+   * findOrCreateIdentity/findIdentityForContact above) needs correcting in
+   * place, not re-created.
+   *
+   * Locates the row by (tenantId, resideResidentId) first - the stable key
+   * the caller actually has - falling back to the old email then the old
+   * phone for rows that predate the reside_resident_id backfill. Returns
+   * null when nothing matches, which is the caller's 404 (a resident who's
+   * never been messaged has no identity yet).
+   *
+   * If the new email or phone already belongs to a *different* identity in
+   * this tenant, that is the same collision findOrCreateIdentity's creation
+   * path handles by merging - both rows are the same human, so this reuses
+   * mergeIdentities rather than a second merge implementation, then applies
+   * the new contact details onto the survivor.
+   */
+  async renameIdentity(
+    tenantId: TenantId,
+    input: Omit<ResideRenameIdentityInput, "tenantId">,
+  ): Promise<{ identity: Identity; result: "renamed" | "merged" | "unchanged" } | null> {
+    const newEmail = input.email ? normalizeEmail(input.email.new) : undefined;
+    const oldEmail = input.email ? normalizeEmail(input.email.old) : undefined;
+    const newPhone = input.phone ? (input.phone.new === null ? null : normalizePhone(input.phone.new)) : undefined;
+    const oldPhone = input.phone ? normalizePhone(input.phone.old) : undefined;
+
+    const existing =
+      (await this.findIdentityByResideResidentId(tenantId, input.resideResidentId)) ??
+      (oldEmail ? await this.findIdentityByEmail(tenantId, oldEmail) : null) ??
+      (oldPhone ? await this.findIdentityByPhone(tenantId, oldPhone) : null);
+    if (!existing) return null;
+
+    let canonical = await this.getCanonicalIdentity(existing.id);
+
+    const emailChanged = newEmail !== undefined && newEmail !== canonical.email;
+    const phoneChanged = newPhone !== undefined && newPhone !== canonical.phone;
+    if (!emailChanged && !phoneChanged) {
+      return { identity: canonical, result: "unchanged" };
+    }
+
+    // Each field is checked against its own collision independently - a
+    // contact that has changed both email and phone since it last messaged
+    // the building can collide on both, against two different rows. Both
+    // collision rows are captured before merging so their *other* contact
+    // field (the one this call isn't renaming) can be carried onto the
+    // survivor below - the merge itself only marks merged_into_id, it
+    // doesn't copy anything (mirrors findOrCreateIdentity's merge branch).
+    let emailCollision: Identity | null = null;
+    let phoneCollision: Identity | null = null;
+
+    if (emailChanged) {
+      const collision = await this.findIdentityByEmail(tenantId, newEmail!);
+      if (collision && collision.id !== canonical.id) {
+        emailCollision = collision;
+        await this.mergeIdentities(tenantId, canonical.id, collision.id, "email");
+        canonical = await this.getCanonicalIdentity(canonical.id);
+      }
+    }
+    if (phoneChanged && newPhone !== null) {
+      const collision = await this.findIdentityByPhone(tenantId, newPhone!);
+      if (collision && collision.id !== canonical.id) {
+        phoneCollision = collision;
+        await this.mergeIdentities(tenantId, canonical.id, collision.id, "phone");
+        canonical = await this.getCanonicalIdentity(canonical.id);
+      }
+    }
+    const merged = emailCollision !== null || phoneCollision !== null;
+
+    const finalEmail =
+      newEmail !== undefined ? newEmail : (canonical.email ?? emailCollision?.email ?? phoneCollision?.email ?? null);
+    const finalPhone =
+      newPhone !== undefined ? newPhone : (canonical.phone ?? phoneCollision?.phone ?? emailCollision?.phone ?? null);
+
+    const updates: Partial<typeof identities.$inferInsert> = {};
+    if (finalEmail !== canonical.email) updates.email = finalEmail;
+    if (finalPhone !== canonical.phone) updates.phone = finalPhone;
+    if (Object.keys(updates).length > 0) {
+      await this.orm.update(identities).set(updates).where(eq(identities.id, canonical.id));
+    }
+
+    const final = await this.getCanonicalIdentity(canonical.id);
+    return { identity: final, result: merged ? "merged" : "renamed" };
   }
 
   /** Phase 9: this used to assume at most one open conversation per
@@ -2541,6 +2628,23 @@ export class DomainService {
       .where(and(
         eq(identities.tenantId, tenantId),
         eq(identities.email, email),
+        isNull(identities.mergedIntoId),
+      ))
+      .limit(1);
+    return identity ?? null;
+  }
+
+  /** Unlike findIdentityByPhone/Email, resideResidentId is never a lookup
+   * key for matching (see findOrCreateIdentity's docblock) - this exists
+   * only for renameIdentity, which has a resideResidentId in hand and needs
+   * the stable row it names, not a contact match. */
+  private async findIdentityByResideResidentId(tenantId: TenantId, resideResidentId: string) {
+    const [identity] = await this.orm
+      .select()
+      .from(identities)
+      .where(and(
+        eq(identities.tenantId, tenantId),
+        eq(identities.resideResidentId, resideResidentId),
         isNull(identities.mergedIntoId),
       ))
       .limit(1);

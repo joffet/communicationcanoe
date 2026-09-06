@@ -38,7 +38,7 @@ async function makeTenant(suffix = "1") {
  * public surface for a test's benefit. */
 type PrivateIdentityApi = {
   mergeIdentities: (t: string, keep: string, merge: string, on: "email" | "phone") => Promise<void>;
-  getCanonicalIdentity: (id: string) => Promise<{ id: string }>;
+  getCanonicalIdentity: (id: string) => Promise<{ id: string; email: string | null; phone: string | null }>;
   findIdentityByEmail: (t: string, email: string) => Promise<{ id: string } | null>;
 };
 const priv = () => domain as unknown as PrivateIdentityApi;
@@ -197,5 +197,130 @@ describe("findOrCreateIdentity under the unique indexes", () => {
     ]);
 
     expect(a.id).toBe(b.id);
+  });
+});
+
+describe("renameIdentity", () => {
+  const RESIDENT_ID = "44444444-4444-4444-4444-444444444444";
+
+  it("renames by resideResidentId when the contact has changed", async () => {
+    const tenant = await makeTenant("rn1");
+    await domain.findOrCreateIdentity(tenant.id, {
+      email: "old@example.test",
+      resideResidentId: RESIDENT_ID,
+    });
+
+    const outcome = await domain.renameIdentity(tenant.id, {
+      resideResidentId: RESIDENT_ID,
+      email: { old: "old@example.test", new: "new@example.test" },
+    });
+
+    expect(outcome?.result).toBe("renamed");
+    expect(outcome?.identity.email).toBe("new@example.test");
+  });
+
+  it("falls back to matching the old email when resideResidentId isn't on the row yet", async () => {
+    const tenant = await makeTenant("rn2");
+    // Predates the reside_resident_id backfill - contact only, no resident id.
+    await domain.findOrCreateIdentity(tenant.id, { email: "legacy@example.test" });
+
+    const outcome = await domain.renameIdentity(tenant.id, {
+      resideResidentId: RESIDENT_ID,
+      email: { old: "legacy@example.test", new: "fresh@example.test" },
+    });
+
+    expect(outcome?.result).toBe("renamed");
+    expect(outcome?.identity.email).toBe("fresh@example.test");
+  });
+
+  it("falls back to matching the old phone when resideResidentId isn't on the row yet", async () => {
+    const tenant = await makeTenant("rn3");
+    await domain.findOrCreateIdentity(tenant.id, { phone: "+15550001111" });
+
+    const outcome = await domain.renameIdentity(tenant.id, {
+      resideResidentId: RESIDENT_ID,
+      phone: { old: "+15550001111", new: "+15550002222" },
+    });
+
+    expect(outcome?.result).toBe("renamed");
+    expect(outcome?.identity.phone).toBe("+15550002222");
+  });
+
+  it("returns null when nothing matches by resident id, old email, or old phone", async () => {
+    const tenant = await makeTenant("rn4");
+
+    const outcome = await domain.renameIdentity(tenant.id, {
+      resideResidentId: RESIDENT_ID,
+      email: { old: "nobody@example.test", new: "somebody@example.test" },
+    });
+
+    expect(outcome).toBeNull();
+  });
+
+  it("is idempotent: re-running with values already on the row makes no change", async () => {
+    const tenant = await makeTenant("rn5");
+    await domain.findOrCreateIdentity(tenant.id, {
+      email: "old@example.test",
+      resideResidentId: RESIDENT_ID,
+    });
+    await domain.renameIdentity(tenant.id, {
+      resideResidentId: RESIDENT_ID,
+      email: { old: "old@example.test", new: "new@example.test" },
+    });
+
+    const again = await domain.renameIdentity(tenant.id, {
+      resideResidentId: RESIDENT_ID,
+      email: { old: "old@example.test", new: "new@example.test" },
+    });
+
+    expect(again?.result).toBe("unchanged");
+    expect(again?.identity.email).toBe("new@example.test");
+  });
+
+  it("merges into the other identity when the new email already belongs to someone else in the tenant", async () => {
+    const tenant = await makeTenant("rn6");
+    const moving = await domain.findOrCreateIdentity(tenant.id, {
+      email: "moving@example.test",
+      resideResidentId: RESIDENT_ID,
+    });
+    const other = await domain.findOrCreateIdentity(tenant.id, {
+      email: "taken@example.test",
+      phone: "+15559998888",
+    });
+
+    const outcome = await domain.renameIdentity(tenant.id, {
+      resideResidentId: RESIDENT_ID,
+      email: { old: "moving@example.test", new: "taken@example.test" },
+    });
+
+    expect(outcome?.result).toBe("merged");
+    // The survivor carries the merged row's other contact detail (phone)
+    // alongside the resident id and updated email - both histories, one row.
+    expect(outcome?.identity.phone).toBe("+15559998888");
+    expect(outcome?.identity.email).toBe("taken@example.test");
+    expect(outcome?.identity.resideResidentId).toBe(RESIDENT_ID);
+
+    // The merged-away row now resolves to the survivor.
+    expect((await priv().getCanonicalIdentity(other.id)).id).toBe(moving.id);
+  });
+
+  it("never matches or touches an identity in another tenant", async () => {
+    const tenantA = await makeTenant("rnA");
+    const tenantB = await makeTenant("rnB");
+    const inB = await domain.findOrCreateIdentity(tenantB.id, {
+      email: "shared@example.test",
+      resideResidentId: RESIDENT_ID,
+    });
+
+    // Same resideResidentId AND same old email, but scoped to tenant A -
+    // must not find tenant B's row.
+    const outcome = await domain.renameIdentity(tenantA.id, {
+      resideResidentId: RESIDENT_ID,
+      email: { old: "shared@example.test", new: "changed@example.test" },
+    });
+
+    expect(outcome).toBeNull();
+    const untouched = await priv().getCanonicalIdentity(inB.id);
+    expect(untouched.email).toBe("shared@example.test");
   });
 });
