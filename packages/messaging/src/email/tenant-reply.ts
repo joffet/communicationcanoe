@@ -22,6 +22,9 @@ export type SendTenantReplyEmailOptions = {
    * routes the send through SES's raw-MIME path (sendSesEmail's
    * sendRawSesEmail branch). */
   attachments?: FetchedEmailAttachment[];
+  /** Extra RFC 5322 headers - today, the unsubscribe pair. Also routes the
+   * send through the raw-MIME path; see sendSesEmail. */
+  headers?: Record<string, string>;
 };
 
 export type SendTenantReplyEmailResult = {
@@ -45,6 +48,7 @@ export async function sendTenantReplyEmail(
         tenant: options.tenant,
         configurationSetName: process.env.SES_CONFIGURATION_SET_NAME,
         attachments: options.attachments,
+        headers: options.headers,
       }),
     { isRetryable: isRetryableSesError },
   );

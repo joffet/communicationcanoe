@@ -138,6 +138,30 @@ export const resideSendMessageInputSchema = z
      * reside's notification inbox uses this for "Send to my building inbox",
      * which is explicitly the button that does not email you.
      */
+    /**
+     * RFC 2369 / RFC 8058 unsubscribe headers, for email.
+     *
+     * An allowlist rather than an open header map. A mail sender that lets its
+     * caller name arbitrary headers lets it set Bcc, replace From, or rewrite
+     * Return-Path, and reside being a trusted caller is not a reason to build
+     * the footgun. Two names is what the unsubscribe work needs; adding a
+     * third is one line here.
+     *
+     * Carrying these forces the send onto SES's raw-MIME path, because
+     * SendEmailCommand has no way to express a custom header at all.
+     *
+     * Not persisted on the message row, exactly as `from` and `attachments`
+     * are not: reside re-derives them per attempt. A retry replayed from
+     * reside's outbox, which has no column for these, therefore sends without
+     * them - the mail still arrives, without the client's native unsubscribe
+     * button on it.
+     */
+    headers: z
+      .object({
+        "List-Unsubscribe": z.string().min(1).optional(),
+        "List-Unsubscribe-Post": z.string().min(1).optional(),
+      })
+      .optional(),
     deliverTo: z.enum(["channel", "inbox"]).default("channel"),
     /**
      * Start a fresh thread rather than continuing whichever one is open.
