@@ -61,6 +61,27 @@ openssl rand -base64 32
 
 `DATABASE_URL` is the app role's PlanetScale connection string (`comm_canoe_app`); `MIGRATION_DATABASE_URL` is the `postgres` role's, used by drizzle-kit only. The app role owns nothing and holds no `CREATE`, so it cannot run DDL by design — see the comments in [drizzle.config.ts](packages/database/drizzle.config.ts).
 
+### Migrations must land before the code
+
+Merging deploys, and `pnpm db:migrate` is manual, so it is possible to ship
+code ahead of its own schema. That happened on 2026-09-07: a column reached a
+Drizzle `select()` before the `ALTER` had run, and the outbound-batch worker
+failed every tick with `column "unsubscribe_url" does not exist` — silently,
+because a worker has nobody to show an error to.
+
+**Apply the migration, then merge.** `pnpm db:check` enforces it: it runs as a
+Railway pre-deploy step, compares the journal against
+`drizzle."__drizzle_migrations"`, and fails the deploy when anything is
+outstanding — so the previous release keeps serving instead of a new one
+half-working.
+
+It verifies, it never applies. Applying would need the postgres role in the
+running service's environment, which is the thing the app/migration split
+exists to prevent. It needs
+[`sql/01-grant-migration-ledger-read.sql`](packages/database/sql/01-grant-migration-ledger-read.sql)
+to have been run once, and fails closed until it has: a check that cannot tell
+is worse than no check, because it reads as protection.
+
 `INTERNAL_API_SECRET` must be the same value in both services: it authenticates web → bridge calls and signs the short-lived tokens the dashboard presents when it opens its live socket. Without it the inbox still works but stops updating on its own.
 
 ## Auth and Tenant Access
@@ -148,6 +169,7 @@ When adding a user from admin, the **Send sign-in email** toggle (default on) se
 | `pnpm test` | Vitest across packages — tenant isolation, scoping census, schema parity, service logic |
 | `pnpm db:generate` | Generate a migration from changes to `packages/database/src/schema/index.ts` |
 | `pnpm db:migrate` | Apply pending Drizzle migrations (uses `MIGRATION_DATABASE_URL`) |
+| `pnpm db:check` | Fail if any migration is unapplied. Runs pre-deploy on Railway, as the app role — see below |
 | `pnpm db:studio` | Open Drizzle Studio against the database |
 | `pnpm --filter @communication-canoe/web auth:migrate` | Create/update Better Auth tables (uses `--yes`; requires `DATABASE_URL`) |
 

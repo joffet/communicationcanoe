@@ -16,7 +16,8 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "db:check": "node scripts/check-migrations.mjs"
   },
   "dependencies": {
     "@communication-canoe/shared": "workspace:*",
