@@ -247,6 +247,20 @@ async function processRecipient(
       // oversized attachment is dropped there rather than failing this send.
       attachments: batch?.attachments ?? undefined,
       attachmentCache: caches.attachments,
+      // Read off the RECIPIENT, unlike everything above it: the From and the
+      // attachments are one notice's, and this is one person's. It is the
+      // whole reason the column exists - the link is already in their body,
+      // but a header is not part of a body and cannot be substituted into
+      // one.
+      headers: recipient.unsubscribeUrl
+        ? {
+            // Angle brackets are required by RFC 2369; a bare URL here is
+            // dropped by every client that parses the field, which looks
+            // exactly like not sending it.
+            "List-Unsubscribe": `<${recipient.unsubscribeUrl}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          }
+        : undefined,
     });
 
     await domain.updateOutboundBatchRecipientStatus(recipient.id, {

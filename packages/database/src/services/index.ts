@@ -9,6 +9,7 @@ import type {
 } from "@communication-canoe/shared";
 import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm";
 import { createDb, type Db } from "../db";
+import { applyUnsubscribePlaceholder } from "../unsubscribe-placeholder";
 import {
   conversationSplits,
   documentChunks,
@@ -854,7 +855,7 @@ export class DomainService {
     channel: "sms" | "email";
     subject?: string;
     body: string;
-    recipients: IdentityContact[];
+    recipients: (IdentityContact & { unsubscribeUrl?: string })[];
     /** Overrides the tenant's From for every email in this batch. */
     from?: string;
     /** Attachment references for every email in this batch, stored verbatim -
@@ -886,7 +887,12 @@ export class DomainService {
           tenantId: input.tenantId,
           channel: input.channel,
           identityContact: identity,
-          body: input.body,
+          // The body is stored per recipient even though the API takes one,
+          // so each person's own unsubscribe link goes in here rather than
+          // needing a merge step at send time. A recipient without one gets
+          // the placeholder stripped, never left showing in a sent email.
+          body: applyUnsubscribePlaceholder(input.body, identity.unsubscribeUrl),
+          unsubscribeUrl: identity.unsubscribeUrl ?? null,
         })),
       );
 

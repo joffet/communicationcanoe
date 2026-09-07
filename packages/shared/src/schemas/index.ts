@@ -113,6 +113,15 @@ export const provisionTenantInputSchema = z.object({
   resideAppUrl: z.string().url().optional(),
 });
 
+/**
+ * What a bulk body writes where each recipient's own unsubscribe link goes.
+ *
+ * Exported so reside and this side cannot disagree about the spelling - a
+ * mismatch would leave the literal token in a sent email, which is the kind of
+ * thing that is only ever noticed by a resident.
+ */
+export const RESIDE_UNSUBSCRIBE_PLACEHOLDER = "{{reside_unsubscribe_url}}";
+
 export const resideSendMessageInputSchema = z
   .object({
     tenantId: z.string().min(1).transform(asResideClientUid),
@@ -218,7 +227,26 @@ export const resideSendBulkMessageInputSchema = z
     channel: z.enum(["sms", "email"]),
     body: z.string().min(1),
     subject: z.string().optional(),
-    recipients: z.array(identityContactBaseSchema).min(1).max(2000),
+    recipients: z
+      .array(
+        identityContactBaseSchema.extend({
+          /**
+           * This recipient's own unsubscribe link.
+           *
+           * A bulk send takes one body for everybody, which is the point of
+           * the bulk API - so a link naming the person reading it could not
+           * reach them. Sent per recipient here, substituted into that
+           * recipient's stored body wherever RESIDE_UNSUBSCRIBE_PLACEHOLDER
+           * appears, and put on their message as the RFC 8058 header pair.
+           *
+           * Signed by reside, opaque here. Optional: a batch that sends none
+           * behaves exactly as it did before.
+           */
+          unsubscribeUrl: z.string().url().optional(),
+        }),
+      )
+      .min(1)
+      .max(2000),
     /** Overrides the tenant's From header for every email in this batch.
      *
      * Same value and the same reasoning as the single-send `from` above -
