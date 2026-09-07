@@ -10,7 +10,8 @@
     "db:generate": "pnpm --filter @communication-canoe/database db:generate",
     "db:migrate": "pnpm --filter @communication-canoe/database db:migrate",
     "db:studio": "pnpm --filter @communication-canoe/database db:studio",
-    "prepare": "node scripts/install-git-hooks.mjs"
+    "prepare": "node scripts/install-git-hooks.mjs",
+    "db:check": "pnpm --filter @communication-canoe/database db:check"
   },
   "devDependencies": {
     "turbo": "^2.5.4",

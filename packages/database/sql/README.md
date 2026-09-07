@@ -18,7 +18,14 @@ Run order:
 2. `pnpm db:migrate` — drizzle-kit's generated migrations, the tables
    themselves.
 
-3. **`99-functions-and-triggers.sql`** — after the tables exist, since every
+3. **`01-grant-migration-ledger-read.sql`** — once per database, any time
+   after step 2. It lets `comm_canoe_app` count rows in
+   `drizzle."__drizzle_migrations"` and nothing else, which is what the
+   pre-deploy `db:check` guard reads. Numbered `01` for where it sits in the
+   file listing; it genuinely runs after the migrations, because the table it
+   grants on does not exist until drizzle-kit has created it.
+
+4. **`99-functions-and-triggers.sql`** — after the tables exist, since every
    statement in it references a table by name. Re-runnable: everything is
    `CREATE OR REPLACE`, except the triggers, which need dropping first if their
    definition changes.
