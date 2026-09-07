@@ -809,6 +809,18 @@ export const outboundBatchRecipients = pgTable(
     identityContact: jsonb("identity_contact").notNull(),
     body: text("body").notNull(),
     /**
+     * This recipient's own unsubscribe link, for the RFC 8058 header.
+     *
+     * The body beside it already carries the link too - it is substituted in
+     * at enqueue, since the body is per recipient here even though the API
+     * takes one. A header is not part of a body and cannot be substituted
+     * into one, which is why it needs a column of its own.
+     *
+     * Null means send without the header, which is what every batch did
+     * before this existed.
+     */
+    unsubscribeUrl: text("unsubscribe_url"),
+    /**
      * 20250701000000: created with CHECK IN ('pending','sent','failed').
      * 20250701002200: constraint dropped and recreated to add 'sending' as
      * an atomic claim state for multi-replica-safe dispatch. Final form only.

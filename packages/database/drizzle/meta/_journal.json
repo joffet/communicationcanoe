@@ -43,6 +43,13 @@
       "when": 1787750788238,
       "tag": "0005_outbound_batch_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787750788239,
+      "tag": "0006_batch_recipient_unsubscribe",
+      "breakpoints": true
     }
   ]
 }
