@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { type TenantId, createAdminService, createDomainService } from "@communication-canoe/database";
 import { notifyResideIdentityStatus } from "@/lib/reside/identity-status-client";
+import { notifyResideMessageBounced } from "@/lib/reside/notify-message-bounced";
 
 type SesEvent = {
   eventType: "Delivery" | "Bounce" | "Complaint" | string;
@@ -11,7 +12,10 @@ type SesEvent = {
     bounceSubType?: string;
     bouncedRecipients?: { diagnosticCode?: string; emailAddress?: string }[];
   };
-  complaint?: { complaintFeedbackType?: string };
+  complaint?: {
+    complaintFeedbackType?: string;
+    complainedRecipients?: { emailAddress?: string }[];
+  };
 };
 
 type SnsEnvelope = {
@@ -70,9 +74,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ sec
       event.bounce?.bouncedRecipients?.[0]?.diagnosticCode ??
       [event.bounce?.bounceType, event.bounce?.bounceSubType].filter(Boolean).join("/") ??
       "bounced";
+    const email = event.bounce?.bouncedRecipients?.[0]?.emailAddress;
     await domain.updateMessageDeliveryStatus(message.id, {
       deliveryStatus: "failed",
       deliveryError: detail,
+    });
+    void notifyResideMessageBounced({
+      messageId: message.id,
+      sesMessageId: messageId,
+      bounceType: event.bounce?.bounceType,
+      bounceSubType: event.bounce?.bounceSubType,
+      diagnostic: detail,
+      email,
+      occurredAt: new Date(),
+      eventType: "Bounce",
     });
     // Only hard (Permanent) bounces count toward the threshold - transient
     // bounces are likely to succeed on a later retry.
@@ -80,9 +95,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ sec
       await recordOutcomeAndMaybeNotifyReside(domain, message, "hard_failure");
     }
   } else if (event.eventType === "Complaint") {
+    const email = event.complaint?.complainedRecipients?.[0]?.emailAddress;
     await domain.updateMessageDeliveryStatus(message.id, {
       deliveryStatus: "failed",
       deliveryError: event.complaint?.complaintFeedbackType ?? "complaint",
+    });
+    void notifyResideMessageBounced({
+      messageId: message.id,
+      sesMessageId: messageId,
+      diagnostic: event.complaint?.complaintFeedbackType ?? "complaint",
+      email,
+      occurredAt: new Date(),
+      eventType: "Complaint",
     });
     // A spam complaint is at least as strong a signal to stop emailing this
     // address as a hard bounce.
