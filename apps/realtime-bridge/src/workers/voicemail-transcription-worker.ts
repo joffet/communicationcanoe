@@ -2,8 +2,13 @@ import { type TenantId, createDomainService } from "@communication-canoe/databas
 import type { DomainService } from "@communication-canoe/database";
 import { createTranscriptionProvider, routeConversation } from "@communication-canoe/shared/ai";
 import { loadConfig } from "../config.js";
+import { startPollLoop } from "./poll-loop.js";
 
 const POLL_INTERVAL_MS = 10_000;
+/** No deadline at all: a voicemail transcript is read minutes later at best.
+ * This worker has never found a row in production - no message has ever
+ * carried a transcription_status - which is also why it has no index. */
+const IDLE_POLL_INTERVAL_MS = 120_000;
 const BATCH_LIMIT = 10;
 
 /**
@@ -16,20 +21,20 @@ const BATCH_LIMIT = 10;
  * same audio wastes an API call but doesn't corrupt state.
  */
 export function startVoicemailTranscriptionWorker(): void {
-  setInterval(() => {
-    void transcribePendingVoicemails().catch((err) => {
-      console.error("[voicemail-transcription-worker] tick failed:", err);
-    });
-  }, POLL_INTERVAL_MS);
-  console.log(`[voicemail-transcription-worker] polling every ${POLL_INTERVAL_MS}ms`);
+  startPollLoop({
+    name: "voicemail-transcription-worker",
+    activeIntervalMs: POLL_INTERVAL_MS,
+    idleIntervalMs: IDLE_POLL_INTERVAL_MS,
+    tick: transcribePendingVoicemails,
+  });
 }
 
-async function transcribePendingVoicemails(): Promise<void> {
+async function transcribePendingVoicemails(): Promise<boolean> {
   const domain = createDomainService();
   const config = loadConfig();
 
   const ids = await domain.listPendingVoicemailTranscriptionMessageIds(BATCH_LIMIT);
-  if (ids.length === 0) return;
+  if (ids.length === 0) return false;
 
   console.log(`[voicemail-transcription-worker] ${ids.length} voicemail(s) awaiting transcription`);
 
@@ -82,6 +87,8 @@ async function transcribePendingVoicemails(): Promise<void> {
         });
     }
   }
+
+  return true;
 }
 
 /** Structural copy of apps/web/src/lib/ai/routing.ts's triggerConversationRouting -

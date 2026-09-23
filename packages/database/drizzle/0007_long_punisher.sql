@@ -1,0 +1,45 @@
+-- Partial indexes for the realtime-bridge worker polls.
+--
+-- Each worker in apps/realtime-bridge/src/workers polls `messages` for its own
+-- pending state, and every one of those polls was a full seq scan plus a sort:
+-- 46k calls and 33M rows read per day (PlanetScale Insights, 2026-09-22),
+-- against a pending set that is empty essentially always. Measured on the
+-- production table - 739 rows, 77 pages - the plan goes from
+--
+--     Seq Scan on messages (Rows Removed by Filter: 739) + Sort, 77 buffers
+--
+-- to a 1-buffer index scan, and the index itself is 8 kB while nothing is
+-- pending. The gain today is small in absolute terms (~12 CPU-seconds/day);
+-- the point is that the polls are O(table size) and run 46k times a day, so
+-- the cost grows linearly with the table and this stops it.
+--
+-- Partial rather than composite: the predicate is what makes the index tiny,
+-- and the indexed column is the ORDER BY, which is the part still left to pay
+-- for once the predicate has been satisfied by every row in the index. Same
+-- shape as outbound_batch_recipients_pending_idx from 20250701000000, which is
+-- why that worker's claim loop never appeared in Insights at all.
+--
+-- Plain CREATE INDEX, not CONCURRENTLY: drizzle-orm's migrator wraps every
+-- migration file in a single transaction (pg-core/dialect.js migrate(), which
+-- calls session.transaction()), and CREATE INDEX CONCURRENTLY cannot run
+-- inside one. On a 77-page table the ACCESS EXCLUSIVE lock is single-digit
+-- milliseconds, so there is nothing to buy here anyway. On a table where that
+-- stopped being true, this could not go through `pnpm db:migrate` at all and
+-- would need applying out of band.
+--
+-- No index on transcription_status: no message has ever carried one, so it
+-- would be write-path cost for a predicate that has never matched. That poll
+-- is handled by backoff alone - see workers/poll-loop.ts.
+--
+-- NOTE: drizzle-kit also proposed
+--     ALTER TABLE "outbound_batch_recipients" ADD COLUMN "unsubscribe_url" text;
+-- here. It is removed deliberately. 0006_batch_recipient_unsubscribe.sql was
+-- hand-written and its meta/0006_snapshot.json never got the column, so the
+-- diff re-proposed a column that 0006 already added and that production
+-- already has. Running it would abort this whole transaction - and with it the
+-- indexes below - on "column already exists". meta/0007_snapshot.json does
+-- record the column, so the snapshot chain is correct from here on and a fresh
+-- database still gets it from 0006's own ALTER.
+CREATE INDEX "messages_tone_review_pending_idx" ON "messages" USING btree ("created_at") WHERE "messages"."ai_review_status" = 'pending';--> statement-breakpoint
+CREATE INDEX "messages_topic_check_pending_idx" ON "messages" USING btree ("created_at") WHERE "messages"."topic_check_status" = 'pending';--> statement-breakpoint
+CREATE INDEX "messages_scheduled_send_queued_idx" ON "messages" USING btree ("scheduled_send_at") WHERE "messages"."delivery_status" = 'queued';

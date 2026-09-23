@@ -687,6 +687,34 @@ export const messages = pgTable(
     uniqueIndex("messages_tenant_idempotency_key_unique")
       .on(t.tenantId, t.idempotencyKey)
       .where(sql`${t.idempotencyKey} is not null`),
+    /**
+     * The realtime-bridge workers each poll this table for their own pending
+     * state, and every one of those polls was a full seq scan plus a sort:
+     * 46k calls and 33M rows read per day against a table whose pending set is
+     * almost always empty. Partial, so the index holds only the rows a worker
+     * could act on - 8 kB when nothing is pending, rather than an entry per
+     * message - and the planner reads a single buffer instead of the whole
+     * heap. Same shape as outbound_batch_recipients_pending_idx below, which
+     * is why that worker's claim loop never showed up in Insights.
+     *
+     * Column order is the ORDER BY, not the predicate: the predicate is
+     * already satisfied by every row in the index, so the sort is what is left
+     * to eliminate.
+     *
+     * No equivalent for transcription_status: no message has ever carried one,
+     * so the index would only cost writes. The worker's backoff covers it.
+     */
+    index("messages_tone_review_pending_idx")
+      .on(t.createdAt)
+      .where(sql`${t.aiReviewStatus} = 'pending'`),
+    index("messages_topic_check_pending_idx")
+      .on(t.createdAt)
+      .where(sql`${t.topicCheckStatus} = 'pending'`),
+    /** Ordered by scheduled_send_at, matching listDueScheduledMessageIds -
+     * every other poll here sorts by created_at, this one does not. */
+    index("messages_scheduled_send_queued_idx")
+      .on(t.scheduledSendAt)
+      .where(sql`${t.deliveryStatus} = 'queued'`),
   ],
 );
 
