@@ -2591,27 +2591,34 @@ export class DomainService {
     return rows.map((row) => row.id);
   }
 
-  /** Plain conditional update, not an atomic claim like Phase 9/10's workers
-   * need - re-running a transcription on the same audio wastes an API call
-   * but doesn't corrupt state (unlike splitConversation or document
-   * chunking, which are non-idempotent side effects that must happen
-   * exactly once), so the simpler check-only-on-write pattern (mirroring
-   * applyToneReviewResult) is sufficient here. */
+  /** Terminal write for a voicemail this replica holds, so it predicates on
+   * the CLAIM state, not on 'pending'.
+   *
+   * 'pending' was right while the worker wrote straight off a pending row,
+   * and wrong the moment 3a49882 put claimVoicemailTranscription in front of
+   * it: the claim leaves the row 'transcribing', so this matched nothing and
+   * silently discarded every transcript after paying for it. The predicate
+   * stays rather than going away, because it is no longer redundant - it is
+   * what stops a replica that hung past a stuck-claim sweep from landing its
+   * stale transcript on top of whichever replica re-claimed the row and
+   * finished first. */
   async updateMessageTranscription(messageId: string, body: string): Promise<void> {
     await this.orm
       .update(messages)
       .set({ body, transcript: body, transcriptionStatus: "ready" })
-      .where(and(eq(messages.id, messageId), eq(messages.transcriptionStatus, "pending")));
+      .where(and(eq(messages.id, messageId), eq(messages.transcriptionStatus, "transcribing")));
   }
 
-  /** Never left stuck at pending - mirrors every other worker's safety-net
+  /** Never left stuck mid-claim - mirrors every other worker's safety-net
    * convention (markDocumentFailed, applyToneReviewResult's default-to-
-   * flagged, markTopicCheckReviewed). */
+   * flagged, markTopicCheckReviewed). Predicates on 'transcribing' for the
+   * same reason updateMessageTranscription does; at 'pending' it recorded no
+   * failure either, so transcription_failure_reason has never been written. */
   async markMessageTranscriptionFailed(messageId: string, reason: string): Promise<void> {
     await this.orm
       .update(messages)
       .set({ transcriptionStatus: "failed", transcriptionFailureReason: reason })
-      .where(and(eq(messages.id, messageId), eq(messages.transcriptionStatus, "pending")));
+      .where(and(eq(messages.id, messageId), eq(messages.transcriptionStatus, "transcribing")));
   }
 
   private async findIdentityByPhone(tenantId: TenantId, phone: string) {

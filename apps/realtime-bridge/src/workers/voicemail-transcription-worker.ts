@@ -16,9 +16,9 @@ const BATCH_LIMIT = 10;
  * apps/web/src/app/api/webhooks/twilio/recording-status webhook, which
  * creates an empty-body placeholder message (transcription_status:
  * 'pending') as soon as a recording completes. Same poll shape as
- * tone-review-worker.ts - a plain conditional update on write, not an
- * atomic claim like Phase 9/10's workers need, since re-transcribing the
- * same audio wastes an API call but doesn't corrupt state.
+ * tone-review-worker.ts, but claiming (pending -> transcribing) since
+ * 3a49882: re-transcribing the same audio doesn't corrupt state, but it
+ * does pay OpenAI twice and race two writes onto one message.
  */
 export function startVoicemailTranscriptionWorker(): void {
   startPollLoop({
@@ -78,8 +78,11 @@ async function transcribePendingVoicemails(): Promise<boolean> {
       void triggerConversationRouting(domain, message.conversationId, message.tenantId).catch(console.error);
     } catch (err) {
       console.error(`[voicemail-transcription-worker] message ${id} failed:`, err);
-      // Never left stuck at pending - same safety-net convention as every
-      // other worker in this codebase.
+      // Never left stuck mid-claim - same safety-net convention as every
+      // other worker in this codebase. Predicated on 'transcribing', so the
+      // one throw that happens BEFORE a claim (the claim itself) leaves the
+      // row at 'pending' and this no-ops: a transient database error
+      // shouldn't burn a voicemail that was never attempted.
       await domain
         .markMessageTranscriptionFailed(id, err instanceof Error ? err.message : "Transcription failed")
         .catch((innerErr) => {
