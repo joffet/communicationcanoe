@@ -656,6 +656,23 @@ export const messages = pgTable(
      */
     transcriptionStatus: text("transcription_status"),
     transcriptionFailureReason: text("transcription_failure_reason"),
+    /**
+     * 0009 — when the claim currently held on this row was taken, so a sweep
+     * can tell an abandoned claim from a fresh one.
+     *
+     * ONE column for both of this table's claims (topic_check_status
+     * 'processing' and transcription_status 'transcribing') because a message
+     * is only ever in one worker's queue: the recording-status webhook
+     * deliberately keeps voicemails out of Phase 9's stale-conversation check
+     * (see its comment), and nothing on the topic-check path writes audio. If
+     * that ever stops being true, the two claims would overwrite each other's
+     * timestamp here and this needs splitting in two.
+     *
+     * Always paired with a status in the predicate, never read alone - it is
+     * left behind on a resolved row rather than cleared by every terminal
+     * write, so on its own it says nothing about whether a claim is live.
+     */
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -715,6 +732,23 @@ export const messages = pgTable(
     index("messages_scheduled_send_queued_idx")
       .on(t.scheduledSendAt)
       .where(sql`${t.deliveryStatus} = 'queued'`),
+    /**
+     * 0009 — the sweep side of the same story, one partial index per claim.
+     * The three above cover finding work ('pending'); these cover finding work
+     * somebody already took and never finished, which no query could ask about
+     * before claimed_at existed.
+     *
+     * Partial for the same reason and more so: a claim state is transient, so
+     * these hold almost nothing almost always. Mirrors
+     * outbound_batch_recipients_claimed_idx, which has had both halves since
+     * 20250701002200.
+     */
+    index("messages_topic_check_claimed_idx")
+      .on(t.claimedAt)
+      .where(sql`${t.topicCheckStatus} = 'processing'`),
+    index("messages_transcription_claimed_idx")
+      .on(t.claimedAt)
+      .where(sql`${t.transcriptionStatus} = 'transcribing'`),
   ],
 );
 
@@ -1114,6 +1148,14 @@ export const documents = pgTable(
       sql`${t.status} in ('pending', 'processing', 'ready', 'failed')`,
     ),
     index("documents_tenant_idx").on(t.tenantId),
+    /**
+     * 0009 — backs the stranded-claim sweep. No claimed_at column here: every
+     * write that moves `status` already stamps updated_at, so on a row held
+     * at 'processing' updated_at IS the claim time.
+     */
+    index("documents_processing_claimed_idx")
+      .on(t.updatedAt)
+      .where(sql`${t.status} = 'processing'`),
   ],
 );
 

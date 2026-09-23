@@ -2062,10 +2062,44 @@ export class DomainService {
   async claimTopicCheckMessage(messageId: string): Promise<Message | null> {
     const [data] = await this.orm
       .update(messages)
-      .set({ topicCheckStatus: "processing" })
+      .set({ topicCheckStatus: "processing", claimedAt: new Date() })
       .where(and(eq(messages.id, messageId), eq(messages.topicCheckStatus, "pending")))
       .returning();
     return data ?? null;
+  }
+
+  /**
+   * Retires topic checks whose replica died holding the claim: 'processing'
+   * -> 'reviewed', without classifying.
+   *
+   * Cancels rather than replays, which is where this parts company with
+   * reclaimStuckOutboundBatchRecipients - a recipient that was never sent
+   * still wants sending, but a topic check does not keep its meaning. The
+   * classifier judges a message against the ten before it, and
+   * splitConversation then sweeps every message from that one's created_at
+   * ONWARD into the new conversation. Replaying the row stranded since
+   * 2026-08-11 would therefore not re-litigate one message: it would tear six
+   * weeks of subsequent, unrelated history out of the conversation an agent
+   * has been working in, on a verdict about context that stopped being
+   * current in August.
+   *
+   * Staying put is also already this worker's answer whenever classification
+   * fails - see the catch in conversation-routing-worker. A crash is the same
+   * situation with no exception to log.
+   */
+  async cancelStrandedTopicChecks(olderThanIso: string): Promise<number> {
+    const cancelled = await this.orm
+      .update(messages)
+      .set({ topicCheckStatus: "reviewed", claimedAt: null })
+      .where(
+        and(
+          eq(messages.topicCheckStatus, "processing"),
+          lt(messages.claimedAt, new Date(olderThanIso)),
+        ),
+      )
+      .returning({ id: messages.id });
+
+    return cancelled.length;
   }
 
   /** Terminal write for a claimed message, regardless of outcome (split or
@@ -2507,6 +2541,45 @@ export class DomainService {
     return claimed ?? null;
   }
 
+  /**
+   * Returns documents whose replica died holding the claim to 'pending', and
+   * throws away any chunks it had already written.
+   *
+   * The delete is the whole reason this is not a two-line status update like
+   * the other two sweeps. document_chunks has no unique on (document_id,
+   * chunk_index) - deliberately, see the table comment - so a replica that
+   * died in the gap between insertDocumentChunks and markDocumentReady leaves
+   * a complete set of chunks behind a 'processing' status. Re-ingesting on
+   * top of those inserts every chunk a SECOND time, and because retrieval is
+   * an exact scan with a per-document diversity cap, the duplicates are
+   * near-identical neighbours that crowd out other sources in the top-K:
+   * every answer for that tenant quietly narrows to one document.
+   *
+   * Deleting is safe in the other direction too - the document is going back
+   * to 'pending', so whatever is there is about to be rebuilt from
+   * content_text, which is on the row itself and never re-fetched.
+   */
+  async reclaimStrandedDocuments(olderThanIso: string): Promise<number> {
+    const reclaimed = await this.orm
+      .update(documents)
+      .set({ status: "pending", updatedAt: new Date() })
+      .where(
+        and(eq(documents.status, "processing"), lt(documents.updatedAt, new Date(olderThanIso))),
+      )
+      .returning({ id: documents.id });
+
+    if (reclaimed.length === 0) return 0;
+
+    await this.orm.delete(documentChunks).where(
+      inArray(
+        documentChunks.documentId,
+        reclaimed.map((row) => row.id),
+      ),
+    );
+
+    return reclaimed.length;
+  }
+
   async insertDocumentChunks(chunks: NewDocumentChunk[]): Promise<void> {
     if (chunks.length === 0) return;
     await this.orm.insert(documentChunks).values(chunks);
@@ -2577,10 +2650,36 @@ export class DomainService {
   async claimVoicemailTranscription(messageId: string): Promise<boolean> {
     const claimed = await this.orm
       .update(messages)
-      .set({ transcriptionStatus: "transcribing" })
+      .set({ transcriptionStatus: "transcribing", claimedAt: new Date() })
       .where(and(eq(messages.id, messageId), eq(messages.transcriptionStatus, "pending")))
       .returning({ id: messages.id });
     return claimed.length > 0;
+  }
+
+  /**
+   * Returns voicemails whose replica died holding the claim to 'pending'.
+   *
+   * Replays, unlike cancelStrandedTopicChecks: the audio is still at
+   * audio_url and a transcript of a six-week-old voicemail is the same
+   * transcript it would have been on the day, whereas the alternative -
+   * retiring it - leaves a message whose entire content is permanently an
+   * empty string. Costs one more Whisper call in the case where the dead
+   * replica had already paid for one, which is the cheaper side to be wrong
+   * on.
+   */
+  async reclaimStrandedVoicemailTranscriptions(olderThanIso: string): Promise<number> {
+    const reclaimed = await this.orm
+      .update(messages)
+      .set({ transcriptionStatus: "pending", claimedAt: null })
+      .where(
+        and(
+          eq(messages.transcriptionStatus, "transcribing"),
+          lt(messages.claimedAt, new Date(olderThanIso)),
+        ),
+      )
+      .returning({ id: messages.id });
+
+    return reclaimed.length;
   }
 
   async listPendingVoicemailTranscriptionMessageIds(limit: number): Promise<string[]> {

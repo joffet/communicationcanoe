@@ -10,6 +10,11 @@ const POLL_INTERVAL_MS = 10_000;
 const IDLE_POLL_INTERVAL_MS = 120_000;
 const BATCH_LIMIT = 5;
 const DEFAULT_MAX_KNOWLEDGE_CHUNKS = 5000;
+/** How long a claimed ("processing") document may sit unresolved before a later
+ * tick assumes the claiming replica died and returns it to pending. The longest
+ * of the three: one claim covers chunking plus an embedding call over every
+ * chunk of the document, and the cap is 5000 of them. */
+const STUCK_CLAIM_TIMEOUT_MS = 30 * 60_000;
 
 /**
  * Phase 10: async half of RAG document ingestion. reside extracts text
@@ -34,6 +39,18 @@ export function startDocumentIngestionWorker(): void {
 
 async function ingestPendingDocuments(): Promise<boolean> {
   const domain = createDomainService();
+
+  // Put back anything a previous replica claimed but died before resolving.
+  // Worth replaying: a document stuck at 'processing' has no chunks anyone can
+  // retrieve, so it is invisible to RAG until someone re-uploads it. The sweep
+  // also drops any chunks the dead replica had already written - without that,
+  // re-ingesting would insert a second copy of every one.
+  const reclaimed = await domain.reclaimStrandedDocuments(
+    new Date(Date.now() - STUCK_CLAIM_TIMEOUT_MS).toISOString(),
+  );
+  if (reclaimed > 0) {
+    console.log(`[document-ingestion-worker] reclaimed ${reclaimed} stranded document(s)`);
+  }
 
   const ids = await domain.listPendingDocumentIds(BATCH_LIMIT);
   if (ids.length === 0) return false;
