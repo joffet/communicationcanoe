@@ -1,7 +1,12 @@
 import { createAdminService, createDomainService } from "@communication-canoe/database";
 import { dispatchOutboundMessage } from "@communication-canoe/messaging";
+import { startPollLoop } from "./poll-loop.js";
 
 const POLL_INTERVAL_MS = 5_000;
+/** A queued message is already sitting behind a deliberate send delay, so a
+ * few extra seconds before an idle loop notices it is not a deadline miss -
+ * it is the same delay, slightly longer. */
+const IDLE_POLL_INTERVAL_MS = 30_000;
 const BATCH_LIMIT = 25;
 
 /**
@@ -14,20 +19,20 @@ const BATCH_LIMIT = 25;
  * distributed coordination" risk acceptance.
  */
 export function startScheduledMessageWorker(): void {
-  setInterval(() => {
-    void dispatchDueScheduledMessages().catch((err) => {
-      console.error("[scheduled-message-worker] tick failed:", err);
-    });
-  }, POLL_INTERVAL_MS);
-  console.log(`[scheduled-message-worker] polling every ${POLL_INTERVAL_MS}ms`);
+  startPollLoop({
+    name: "scheduled-message-worker",
+    activeIntervalMs: POLL_INTERVAL_MS,
+    idleIntervalMs: IDLE_POLL_INTERVAL_MS,
+    tick: dispatchDueScheduledMessages,
+  });
 }
 
-async function dispatchDueScheduledMessages(): Promise<void> {
+async function dispatchDueScheduledMessages(): Promise<boolean> {
   const domain = createDomainService();
   const admin = createAdminService();
 
   const ids = await domain.listDueScheduledMessageIds(BATCH_LIMIT);
-  if (ids.length === 0) return;
+  if (ids.length === 0) return false;
 
   console.log(`[scheduled-message-worker] ${ids.length} scheduled message(s) due`);
 
@@ -79,4 +84,6 @@ async function dispatchDueScheduledMessages(): Promise<void> {
         });
     }
   }
+
+  return true;
 }

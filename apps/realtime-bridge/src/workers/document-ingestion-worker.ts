@@ -1,8 +1,13 @@
 import { createDomainService } from "@communication-canoe/database";
 import { createEmbeddingProvider } from "@communication-canoe/shared/ai";
 import { chunkDocumentText } from "@communication-canoe/shared/knowledge";
+import { startPollLoop } from "./poll-loop.js";
 
 const POLL_INTERVAL_MS = 10_000;
+/** reside waits on nothing here - it gets its 202 the moment the row is
+ * written - so the only cost of a late tick is a document that becomes
+ * searchable a little later. */
+const IDLE_POLL_INTERVAL_MS = 120_000;
 const BATCH_LIMIT = 5;
 const DEFAULT_MAX_KNOWLEDGE_CHUNKS = 5000;
 
@@ -19,19 +24,19 @@ const DEFAULT_MAX_KNOWLEDGE_CHUNKS = 5000;
  * same document).
  */
 export function startDocumentIngestionWorker(): void {
-  setInterval(() => {
-    void ingestPendingDocuments().catch((err) => {
-      console.error("[document-ingestion-worker] tick failed:", err);
-    });
-  }, POLL_INTERVAL_MS);
-  console.log(`[document-ingestion-worker] polling every ${POLL_INTERVAL_MS}ms`);
+  startPollLoop({
+    name: "document-ingestion-worker",
+    activeIntervalMs: POLL_INTERVAL_MS,
+    idleIntervalMs: IDLE_POLL_INTERVAL_MS,
+    tick: ingestPendingDocuments,
+  });
 }
 
-async function ingestPendingDocuments(): Promise<void> {
+async function ingestPendingDocuments(): Promise<boolean> {
   const domain = createDomainService();
 
   const ids = await domain.listPendingDocumentIds(BATCH_LIMIT);
-  if (ids.length === 0) return;
+  if (ids.length === 0) return false;
 
   console.log(`[document-ingestion-worker] ${ids.length} document(s) awaiting ingestion`);
 
@@ -86,4 +91,6 @@ async function ingestPendingDocuments(): Promise<void> {
         });
     }
   }
+
+  return true;
 }

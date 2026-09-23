@@ -1,7 +1,12 @@
 import { createDomainService } from "@communication-canoe/database";
 import { reviewMessageTone } from "@communication-canoe/shared/ai";
+import { startPollLoop } from "./poll-loop.js";
 
 const POLL_INTERVAL_MS = 5_000;
+/** Deliberately the tightest ceiling of any worker here. This one gates a
+ * send, and the review must land inside the compose flow's 60s delay - at
+ * 15s an idle loop still gets four attempts inside that window. */
+const IDLE_POLL_INTERVAL_MS = 15_000;
 const BATCH_LIMIT = 25;
 const RECENT_MESSAGE_CONTEXT_LIMIT = 10;
 
@@ -16,19 +21,19 @@ const RECENT_MESSAGE_CONTEXT_LIMIT = 10;
  * distributed coordination" risk acceptance.
  */
 export function startToneReviewWorker(): void {
-  setInterval(() => {
-    void reviewPendingMessages().catch((err) => {
-      console.error("[tone-review-worker] tick failed:", err);
-    });
-  }, POLL_INTERVAL_MS);
-  console.log(`[tone-review-worker] polling every ${POLL_INTERVAL_MS}ms`);
+  startPollLoop({
+    name: "tone-review-worker",
+    activeIntervalMs: POLL_INTERVAL_MS,
+    idleIntervalMs: IDLE_POLL_INTERVAL_MS,
+    tick: reviewPendingMessages,
+  });
 }
 
-async function reviewPendingMessages(): Promise<void> {
+async function reviewPendingMessages(): Promise<boolean> {
   const domain = createDomainService();
 
   const ids = await domain.listPendingToneReviewMessageIds(BATCH_LIMIT);
-  if (ids.length === 0) return;
+  if (ids.length === 0) return false;
 
   console.log(`[tone-review-worker] ${ids.length} message(s) awaiting review`);
 
@@ -63,4 +68,6 @@ async function reviewPendingMessages(): Promise<void> {
         });
     }
   }
+
+  return true;
 }

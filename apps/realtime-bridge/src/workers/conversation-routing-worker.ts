@@ -1,7 +1,11 @@
 import { createDomainService } from "@communication-canoe/database";
 import { classifyTopicShift } from "@communication-canoe/shared/ai";
+import { startPollLoop } from "./poll-loop.js";
 
 const POLL_INTERVAL_MS = 30_000;
+/** The widest ceiling here, matching the "no hard deadline" note below: a
+ * topic split is a tidying operation, and five minutes late is invisible. */
+const IDLE_POLL_INTERVAL_MS = 300_000;
 const BATCH_LIMIT = 25;
 const PRIOR_MESSAGE_CONTEXT_LIMIT = 10;
 const AI_SPLIT_CIRCUIT_BREAKER_LIMIT = 10;
@@ -27,19 +31,19 @@ const AI_SPLIT_CIRCUIT_BREAKER_WINDOW_MINUTES = 60;
  * testing.
  */
 export function startConversationRoutingWorker(): void {
-  setInterval(() => {
-    void reviewPendingTopicChecks().catch((err) => {
-      console.error("[conversation-routing-worker] tick failed:", err);
-    });
-  }, POLL_INTERVAL_MS);
-  console.log(`[conversation-routing-worker] polling every ${POLL_INTERVAL_MS}ms`);
+  startPollLoop({
+    name: "conversation-routing-worker",
+    activeIntervalMs: POLL_INTERVAL_MS,
+    idleIntervalMs: IDLE_POLL_INTERVAL_MS,
+    tick: reviewPendingTopicChecks,
+  });
 }
 
-async function reviewPendingTopicChecks(): Promise<void> {
+async function reviewPendingTopicChecks(): Promise<boolean> {
   const domain = createDomainService();
 
   const ids = await domain.listPendingTopicCheckMessageIds(BATCH_LIMIT);
-  if (ids.length === 0) return;
+  if (ids.length === 0) return false;
 
   console.log(`[conversation-routing-worker] ${ids.length} message(s) awaiting topic check`);
 
@@ -102,4 +106,6 @@ async function reviewPendingTopicChecks(): Promise<void> {
       });
     }
   }
+
+  return true;
 }
