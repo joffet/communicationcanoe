@@ -10,6 +10,11 @@ const BATCH_LIMIT = 25;
 const PRIOR_MESSAGE_CONTEXT_LIMIT = 10;
 const AI_SPLIT_CIRCUIT_BREAKER_LIMIT = 10;
 const AI_SPLIT_CIRCUIT_BREAKER_WINDOW_MINUTES = 60;
+/** How long a claimed ("processing") message may sit unresolved before a later
+ * tick assumes the claiming replica died. Well above one classify - a single
+ * AI call, seconds - so a slow-but-alive check is never retired underneath
+ * itself. Matches outbound-batch-worker's STUCK_CLAIM_TIMEOUT_MS. */
+const STUCK_CLAIM_TIMEOUT_MS = 5 * 60_000;
 
 /**
  * Phase 9: the async half of AI-automated conversation routing. The
@@ -41,6 +46,33 @@ export function startConversationRoutingWorker(): void {
 
 async function reviewPendingTopicChecks(): Promise<boolean> {
   const domain = createDomainService();
+
+  // Retire anything a dead replica left claimed. Retire, not requeue: a topic
+  // check does not keep its meaning the way an unsent recipient does, and
+  // splitConversation sweeps every message from the claimed one's created_at
+  // onward - so replaying a long-stranded row would move weeks of unrelated
+  // later history, not just re-decide one message. See
+  // cancelStrandedTopicChecks for the whole argument.
+  //
+  // Before the listPending* below, in all three workers, because the two that
+  // requeue put the row back at 'pending' where the same tick then finds it -
+  // so a reclaim reports work and holds the fast interval, rather than
+  // backing off with something newly runnable sitting there.
+  //
+  // This does mean one extra statement per tick, including idle ones, which
+  // is the cadence the poll-loop backoff just cut. It has to be: a stranded
+  // claim is by definition what is left when there is no pending work, so
+  // gating the sweep on finding work would stop it ever running. The cost is
+  // an index-only probe of a partial index that is empty almost always -
+  // roughly 1.7k statements a day against the 46k that backoff removed.
+  const cancelled = await domain.cancelStrandedTopicChecks(
+    new Date(Date.now() - STUCK_CLAIM_TIMEOUT_MS).toISOString(),
+  );
+  if (cancelled > 0) {
+    console.log(
+      `[conversation-routing-worker] retired ${cancelled} stranded topic check(s) without classifying`,
+    );
+  }
 
   const ids = await domain.listPendingTopicCheckMessageIds(BATCH_LIMIT);
   if (ids.length === 0) return false;

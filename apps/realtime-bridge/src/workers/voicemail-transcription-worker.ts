@@ -10,6 +10,12 @@ const POLL_INTERVAL_MS = 10_000;
  * carried a transcription_status - which is also why it has no index. */
 const IDLE_POLL_INTERVAL_MS = 120_000;
 const BATCH_LIMIT = 10;
+/** How long a claimed ("transcribing") voicemail may sit unresolved before a
+ * later tick assumes the claiming replica died and returns it to pending.
+ * Longer than conversation-routing's: this holds a Twilio media download plus
+ * a Whisper call over the whole recording, and re-claiming a live one buys a
+ * duplicate of both. */
+const STUCK_CLAIM_TIMEOUT_MS = 15 * 60_000;
 
 /**
  * Phase 11: transcribes voicemails recorded via the new
@@ -32,6 +38,18 @@ export function startVoicemailTranscriptionWorker(): void {
 async function transcribePendingVoicemails(): Promise<boolean> {
   const domain = createDomainService();
   const config = loadConfig();
+
+  // Put back anything a previous replica claimed but died before resolving.
+  // Worth replaying here (unlike a topic check): the audio is still at
+  // audio_url and its transcript is the same one it would have been on the
+  // day, while leaving it stranded means a message whose whole content is
+  // permanently "".
+  const reclaimed = await domain.reclaimStrandedVoicemailTranscriptions(
+    new Date(Date.now() - STUCK_CLAIM_TIMEOUT_MS).toISOString(),
+  );
+  if (reclaimed > 0) {
+    console.log(`[voicemail-transcription-worker] reclaimed ${reclaimed} stranded voicemail(s)`);
+  }
 
   const ids = await domain.listPendingVoicemailTranscriptionMessageIds(BATCH_LIMIT);
   if (ids.length === 0) return false;

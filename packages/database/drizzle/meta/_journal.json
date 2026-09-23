@@ -64,6 +64,13 @@
       "when": 1790132266965,
       "tag": "0008_voicemail_transcribing_reset",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790133056579,
+      "tag": "0009_worker_claim_sweeps",
+      "breakpoints": true
     }
   ]
 }
