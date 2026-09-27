@@ -1,6 +1,6 @@
 import twilio from "twilio";
 import { createDomainService } from "@communication-canoe/database";
-import { triggerConversationRouting } from "@/lib/ai/routing";
+import { ingestInboundSms } from "@/lib/inbound/sms";
 
 function validateTwilioSignature(
   authToken: string,
@@ -46,27 +46,7 @@ export async function POST(request: Request) {
     return new Response("Unknown tenant number", { status: 404 });
   }
 
-  const identity = await domain.findOrCreateIdentity(tenant.id, { phone: from });
-  const { conversation, isStale } = await domain.findOrCreateConversation(tenant.id, identity.id, {
-    channel: "sms",
-  });
-
-  await domain.appendMessage({
-    tenantId: tenant.id,
-    conversationId: conversation.id,
-    channel: "sms",
-    direction: "inbound",
-    senderType: "external",
-    body,
-    // Came directly from the customer.
-    visibility: "external",
-    // Phase 9: flags this message for the async AI topic-shift check when
-    // the conversation it landed in had gone quiet past the tenant's
-    // staleness threshold - never blocks this response on an AI call.
-    ...(isStale && { topicCheckStatus: "pending" }),
-  });
-
-  void triggerConversationRouting(conversation.id, tenant.id).catch(console.error);
+  await ingestInboundSms(domain, { tenantId: tenant.id, from, body });
 
   return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
     status: 200,

@@ -496,3 +496,22 @@ export type ResideSendBulkMessageInput = z.infer<typeof resideSendBulkMessageInp
 export type ResideCreateKnowledgeDocumentInput = z.infer<typeof resideCreateKnowledgeDocumentInputSchema>;
 export type ResideRenameIdentityInput = z.infer<typeof resideRenameIdentityInputSchema>;
 export type ResideAnonymizeSubjectInput = z.infer<typeof resideAnonymizeSubjectInputSchema>;
+
+/**
+ * A resident's text that reside received on its own Twilio webhook
+ * (/api/sms/inbound) and forwards here because it is not an opt-out keyword.
+ * reside keeps STOP/START - they record its SMS opt-outs - and
+ * already verified the Twilio signature with the tenant's own auth token, so
+ * this side trusts the shared secret rather than re-checking a signature it
+ * may not hold the token for.
+ *
+ * `messageSid` is Twilio's id for the message. It is the idempotency key: a
+ * forward retried after a lost response lands once.
+ */
+export const resideInboundSmsInputSchema = z.object({
+  tenantId: z.string().min(1).transform(asResideClientUid),
+  from: z.string().min(1),
+  to: z.string().min(1),
+  body: z.string(),
+  messageSid: z.string().min(1),
+});
