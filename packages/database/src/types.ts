@@ -67,6 +67,12 @@ export type LiveTransfer = typeof liveTransfers.$inferSelect;
 export type IdentityConversionLog = typeof identityConversionLogs.$inferSelect;
 export type OutboundBatch = typeof outboundBatches.$inferSelect;
 export type OutboundBatchRecipient = typeof outboundBatchRecipients.$inferSelect;
+/** A recipient as the batch-status read reports it - see
+ * listOutboundBatchRecipients. */
+export type OutboundBatchRecipientStatus = Pick<
+  OutboundBatchRecipient,
+  "id" | "identityContact" | "messageId" | "status"
+>;
 export type Tag = typeof tags.$inferSelect;
 export type ConversationAssignee = typeof conversationAssignees.$inferSelect;
 export type ConversationReadState = typeof conversationReadStates.$inferSelect;

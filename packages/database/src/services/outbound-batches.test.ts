@@ -96,6 +96,22 @@ describe("getOutboundBatchDetail", () => {
     expect(detail).toBeNull();
   });
 
+  /**
+   * Reside polls this every 15 minutes for a week after each send. With the
+   * whole recipient row (each one holds its own copy of the body) and the
+   * whole message row behind it, one Cardiff notice was ~1.1MB a poll.
+   */
+  it("reports statuses without any copy of the message body", async () => {
+    const tenant = await makeTenant("1");
+    const batch = await makeBatch(tenant.id);
+
+    const detail = await domain.getOutboundBatchDetail(batch.id, tenant.id);
+
+    expect(Object.keys(detail?.recipients[0] ?? {}).sort()).toEqual(
+      ["clickedAt", "deliveryError", "deliveryStatus", "id", "identityContact", "messageId", "openedAt", "status"],
+    );
+  });
+
   it("carries delivery status through from the recipient's message", async () => {
     const tenant = await makeTenant("1");
     const batch = await makeBatch(tenant.id);

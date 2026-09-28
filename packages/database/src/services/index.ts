@@ -60,6 +60,7 @@ import type {
   NewDocumentChunk,
   OutboundBatch,
   OutboundBatchRecipient,
+  OutboundBatchRecipientStatus,
   Tag,
   Team,
   Tenant,
@@ -914,9 +915,20 @@ export class DomainService {
     return batch ?? null;
   }
 
-  async listOutboundBatchRecipients(batchId: string): Promise<OutboundBatchRecipient[]> {
+  /**
+   * The four columns the batch-status read reports, not the row. Each row
+   * carries its own copy of the message `body` (personalised only by its
+   * unsubscribe link), so `select()` here made reside's 15-minute delivery
+   * poll ~1.1MB a call for a batch it only wanted statuses from.
+   */
+  async listOutboundBatchRecipients(batchId: string): Promise<OutboundBatchRecipientStatus[]> {
     return this.orm
-      .select()
+      .select({
+        id: outboundBatchRecipients.id,
+        identityContact: outboundBatchRecipients.identityContact,
+        messageId: outboundBatchRecipients.messageId,
+        status: outboundBatchRecipients.status,
+      })
       .from(outboundBatchRecipients)
       .where(eq(outboundBatchRecipients.batchId, batchId))
       .orderBy(asc(outboundBatchRecipients.createdAt));
@@ -1038,7 +1050,7 @@ export class DomainService {
   async getOutboundBatchDetail(batchId: string, tenantId: TenantId): Promise<{
     batch: OutboundBatch;
     recipients: Array<
-      OutboundBatchRecipient & {
+      OutboundBatchRecipientStatus & {
         deliveryStatus: MessageDeliveryStatus | null;
         deliveryError: string | null;
         openedAt: Date | null;
@@ -1052,13 +1064,25 @@ export class DomainService {
     const recipients = await this.listOutboundBatchRecipients(batchId);
     const messageIds = recipients.map((r) => r.messageId).filter((id): id is string => Boolean(id));
 
-    const messageMap = new Map<string, Message>();
+    // Delivery columns only: a bare select() also read every message's body,
+    // transcript, ai_summary and ai_review_reasoning, none of which this
+    // reports.
+    const messageMap = new Map<
+      string,
+      Pick<Message, "deliveryStatus" | "deliveryError" | "openedAt" | "clickedAt">
+    >();
     if (messageIds.length) {
       const rows = await this.orm
-        .select()
+        .select({
+          id: messages.id,
+          deliveryStatus: messages.deliveryStatus,
+          deliveryError: messages.deliveryError,
+          openedAt: messages.openedAt,
+          clickedAt: messages.clickedAt,
+        })
         .from(messages)
         .where(inArray(messages.id, messageIds));
-      for (const m of rows) messageMap.set(m.id, m as unknown as Message);
+      for (const m of rows) messageMap.set(m.id, m as Pick<Message, "deliveryStatus" | "deliveryError" | "openedAt" | "clickedAt">);
     }
 
     return {
