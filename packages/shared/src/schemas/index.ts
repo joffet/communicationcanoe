@@ -243,6 +243,16 @@ export const resideSendBulkMessageInputSchema = z
            * behaves exactly as it did before.
            */
           unsubscribeUrl: z.string().url().optional(),
+          /**
+           * The comm-canoe message id of what THIS recipient received for the
+           * notice this one follows up. Email only: the recipient's copy is
+           * threaded under it via In-Reply-To / References.
+           *
+           * Optional and best effort - an id that is unknown, belongs to
+           * another tenant, or was never accepted by the provider sends the
+           * email unthreaded rather than failing it.
+           */
+          inReplyToMessageId: z.string().uuid().optional(),
         }),
       )
       .min(1)

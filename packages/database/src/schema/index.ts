@@ -883,6 +883,19 @@ export const outboundBatchRecipients = pgTable(
      */
     unsubscribeUrl: text("unsubscribe_url"),
     /**
+     * The message this recipient received for the notice this one follows up,
+     * so the email can thread under it (In-Reply-To / References).
+     *
+     * Per recipient because the original is: each person's copy of the
+     * original is its own messages row with its own provider Message-ID.
+     * Deliberately not a foreign key - a follow-up must still send if the
+     * original row is ever purged, and the worker already treats a missing
+     * one as "send unthreaded".
+     *
+     * Null means an ordinary, unthreaded send.
+     */
+    inReplyToMessageId: uuid("in_reply_to_message_id"),
+    /**
      * 20250701000000: created with CHECK IN ('pending','sent','failed').
      * 20250701002200: constraint dropped and recreated to add 'sending' as
      * an atomic claim state for multi-replica-safe dispatch. Final form only.

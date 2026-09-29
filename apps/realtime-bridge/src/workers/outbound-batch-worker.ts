@@ -1,6 +1,7 @@
 import { createAdminService, createDomainService } from "@communication-canoe/database";
 import type { AdminService, DomainService } from "@communication-canoe/database";
 import {
+  buildBulkEmailHeaders,
   createAttachmentFetchCache,
   describeError,
   dispatchOutboundMessage,
@@ -235,6 +236,19 @@ async function processRecipient(
       visibility: "external",
     });
 
+    // Threading is best effort: a follow-up that cannot find its original
+    // goes out as an ordinary email rather than not at all. The lookup is
+    // tenant-scoped because the id came from the caller.
+    let referencedProviderMessageId: string | null = null;
+    if (recipient.channel === "email" && recipient.inReplyToMessageId) {
+      referencedProviderMessageId = await domain
+        .getProviderMessageId(recipient.tenantId, recipient.inReplyToMessageId)
+        .catch((err) => {
+          console.error(`[outbound-batch-worker] thread lookup failed for ${recipient.id}: ${describeError(err)}`);
+          return null;
+        });
+    }
+
     // The batch's From, when reside supplied one. Read from the batch rather
     // than the recipient for the same reason it is stored there: one notice,
     // one building, one sending identity.
@@ -251,19 +265,13 @@ async function processRecipient(
       attachments: batch?.attachments ?? undefined,
       attachmentCache: caches.attachments,
       // Read off the RECIPIENT, unlike everything above it: the From and the
-      // attachments are one notice's, and this is one person's. It is the
-      // whole reason the column exists - the link is already in their body,
-      // but a header is not part of a body and cannot be substituted into
-      // one.
-      headers: recipient.unsubscribeUrl
-        ? {
-            // Angle brackets are required by RFC 2369; a bare URL here is
-            // dropped by every client that parses the field, which looks
-            // exactly like not sending it.
-            "List-Unsubscribe": `<${recipient.unsubscribeUrl}>`,
-            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-          }
-        : undefined,
+      // attachments are one notice's, and this is one person's. The
+      // unsubscribe link is already in their body, but a header is not part
+      // of a body and cannot be substituted into one.
+      headers: buildBulkEmailHeaders({
+        unsubscribeUrl: recipient.unsubscribeUrl,
+        referencedProviderMessageId,
+      }),
     });
 
     // Retried, and never downgraded to failed below: if the email went out,

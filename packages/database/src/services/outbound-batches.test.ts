@@ -1,7 +1,8 @@
+import { eq } from "drizzle-orm";
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { DomainService } from "./index";
 import { createTestDb, resetTestDb, type TestDb } from "../testing/pglite";
-import { outboundBatches, outboundBatchRecipients, tenants } from "../schema";
+import { conversations, identities, messages, outboundBatches, outboundBatchRecipients, tenants } from "../schema";
 import { asResideClientUid, type TenantId } from "@communication-canoe/shared/brands";
 
 let db: TestDb;
@@ -288,5 +289,66 @@ describe("createOutboundBatch attachments", () => {
 
     expect((await domain.getOutboundBatch(notice.id))?.attachments).toBeNull();
     expect((await domain.getOutboundBatch(agreement.id))?.attachments).toEqual([ATTACHMENT]);
+  });
+});
+
+describe("follow-up threading data", () => {
+  async function makeMessage(tenantId: TenantId, providerMessageId: string | null) {
+    const [identity] = await db.insert(identities).values({ tenantId, email: "resident@example.test" }).returning();
+    const [conversation] = await db
+      .insert(conversations)
+      .values({ tenantId, identityId: identity.id, status: "open" })
+      .returning();
+    const [message] = await db
+      .insert(messages)
+      .values({
+        tenantId,
+        conversationId: conversation.id,
+        channel: "email",
+        direction: "outbound",
+        senderType: "system",
+        body: "original",
+        providerMessageId,
+      })
+      .returning();
+    return message;
+  }
+
+  it("stores inReplyToMessageId per recipient at enqueue", async () => {
+    const tenant = await makeTenant("1");
+    const original = await makeMessage(tenant.id, "ses-1");
+
+    const batch = await domain.createOutboundBatch({
+      tenantId: tenant.id,
+      channel: "email",
+      subject: "Follow-up",
+      body: "hello",
+      recipients: [
+        { email: "a@example.test", inReplyToMessageId: original.id },
+        { email: "b@example.test" },
+      ],
+    });
+
+    const rows = await db.select().from(outboundBatchRecipients).where(eq(outboundBatchRecipients.batchId, batch.id));
+    const byEmail = Object.fromEntries(rows.map((r) => [(r.identityContact as { email: string }).email, r]));
+    expect(byEmail["a@example.test"].inReplyToMessageId).toBe(original.id);
+    expect(byEmail["b@example.test"].inReplyToMessageId).toBeNull();
+  });
+
+  it("getProviderMessageId returns the id to the owning tenant only", async () => {
+    const tenantA = await makeTenant("1");
+    const tenantB = await makeTenant("2");
+    const message = await makeMessage(tenantA.id, "ses-1");
+
+    expect(await domain.getProviderMessageId(tenantA.id, message.id)).toBe("ses-1");
+    expect(await domain.getProviderMessageId(tenantB.id, message.id)).toBeNull();
+  });
+
+  it("getProviderMessageId is null for a missing message or one never accepted by a provider", async () => {
+    const tenant = await makeTenant("1");
+    const unsent = await makeMessage(tenant.id, null);
+
+    expect(await domain.getProviderMessageId(tenant.id, unsent.id)).toBeNull();
+    expect(await domain.getProviderMessageId(tenant.id, "00000000-0000-0000-0000-000000000000")).toBeNull();
   });
 });
