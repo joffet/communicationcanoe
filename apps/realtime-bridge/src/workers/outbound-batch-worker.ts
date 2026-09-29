@@ -2,7 +2,9 @@ import { createAdminService, createDomainService } from "@communication-canoe/da
 import type { AdminService, DomainService } from "@communication-canoe/database";
 import {
   createAttachmentFetchCache,
+  describeError,
   dispatchOutboundMessage,
+  recordWithRetry,
   type AttachmentFetchCache,
 } from "@communication-canoe/messaging";
 
@@ -167,6 +169,7 @@ async function processRecipient(
   caches: Caches,
   recipient: Awaited<ReturnType<DomainService["listPendingOutboundBatchRecipients"]>>[number],
 ): Promise<void> {
+  let dispatched = false;
   try {
     // Claim BEFORE any send. Without this two replicas both read the same
     // pending rows and both dispatch - on a Notice to hundreds of residents,
@@ -263,21 +266,29 @@ async function processRecipient(
         : undefined,
     });
 
-    await domain.updateOutboundBatchRecipientStatus(recipient.id, {
-      status: sent.deliveryStatus === "failed" ? "failed" : "sent",
-      messageId: sent.id,
-      error: sent.deliveryError ?? null,
-    });
-    await domain.incrementOutboundBatchCompleted(recipient.batchId);
+    // Retried, and never downgraded to failed below: if the email went out,
+    // a lost write here would otherwise leave the recipient "sending" - which
+    // the stuck-claim sweep puts back to pending and sends AGAIN - or, through
+    // the catch, "failed", which reside offers to resend.
+    dispatched = true;
+    await recordWithRetry(() =>
+      domain.updateOutboundBatchRecipientStatus(recipient.id, {
+        status: sent.deliveryStatus === "failed" ? "failed" : "sent",
+        messageId: sent.id,
+        error: sent.deliveryError ?? null,
+      }),
+    );
+    await recordWithRetry(() => domain.incrementOutboundBatchCompleted(recipient.batchId));
   } catch (err) {
-    console.error(`[outbound-batch-worker] recipient ${recipient.id} failed:`, err);
+    console.error(`[outbound-batch-worker] recipient ${recipient.id} failed: ${describeError(err)}`);
+    if (dispatched) return;
     await failRecipient(
       domain,
       recipient.id,
       recipient.batchId,
-      err instanceof Error ? err.message : String(err),
+      describeError(err),
     ).catch((innerErr) => {
-      console.error(`[outbound-batch-worker] failed to record failure for ${recipient.id}:`, innerErr);
+      console.error(`[outbound-batch-worker] failed to record failure for ${recipient.id}: ${describeError(innerErr)}`);
     });
   }
 }

@@ -33,3 +33,4 @@ export type {
 } from "./email/attachments";
 
 export { dispatchOutboundMessage } from "./dispatch-message";
+export { describeError, recordWithRetry } from "./record-with-retry";

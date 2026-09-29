@@ -10,6 +10,7 @@ import {
   type AttachmentFetchCache,
   type EmailAttachmentRef,
 } from "./email/attachments";
+import { describeError, recordWithRetry } from "./record-with-retry";
 
 function withOpenTrackingPixel(html: string, messageId: string): string {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
@@ -78,76 +79,122 @@ export async function dispatchOutboundMessage(params: {
   const domain = createDomainService();
   const { tenant, message, to, from, attachments, attachmentCache, headers } = params;
 
+  let providerMessageId: string | undefined;
   try {
-    if (message.channel === "sms") {
-      const result = await sendSms({ to, from: tenant.twilioNumber, body: message.body });
-      return await domain.updateMessageDeliveryStatus(message.id, {
-        deliveryStatus: "sent",
-        providerMessageId: result.sid,
-        sentAt: new Date().toISOString(),
-        incrementAttempts: true,
-      });
-    }
-
-    if (message.channel === "email") {
-      let html = withOpenTrackingPixel(message.body, message.id);
-      if (message.senderType === "internal_user") {
-        html = withMemberPortalLink(html, message.conversationId, tenant);
-      }
-      // Last, so the portal link above is tracked too, and so the pixel that
-      // withOpenTrackingPixel just appended is left alone - it is an <img>,
-      // and the rewriter only touches anchors. Same per-message identity the
-      // pixel uses: message.id is this recipient's own row, which is what
-      // makes a click attributable to a person rather than to a batch.
-      //
-      // The tenant's own reside host decides which links keep their URL and
-      // carry the token as a parameter, and which are wrapped in a redirect -
-      // a wrapped link can never open the reside mobile app. Same value the
-      // portal link above prefers, for the same reason: One Cardiff's
-      // residents are sent to One Cardiff's host, not a shared one.
-      html = withClickTracking(html, message.id, tenant.resideAppUrl);
-      // Resolved right before the send, not earlier - a bad or oversized
-      // attachment must never block the email itself (fetchEmailAttachments
-      // drops and logs rather than throwing), and there's no reason to pay
-      // the fetch cost on the sms branch above.
-      const fetchedAttachments = await fetchEmailAttachments(attachments, attachmentCache);
-      const result = await sendTenantReplyEmail({
-        to,
-        subject: message.subject ?? "",
-        text: html,
-        tenant,
-        from,
-        // Whatever the From would have been without the override - the
-        // tenant's inbound address. The override is a send-only identity, so
-        // without this a resident who hits Reply is writing into a void;
-        // with it the reply lands in the same mailbox, and threads into the
-        // same conversation, as it did before overrides existed.
-        //
-        // Derived here rather than sent by reside because this side owns the
-        // address: reside's copy of it is a cache that drifts if the value is
-        // edited in comm-canoe.
-        replyTo: from ? resolveMailFrom(tenant) : undefined,
-        // Reside always sends its rendered HTML (notification templates,
-        // notice bodies) as `body` - never plain text needing escaping.
-        isHtml: true,
-        attachments: fetchedAttachments.length > 0 ? fetchedAttachments : undefined,
-        headers,
-      });
-      return await domain.updateMessageDeliveryStatus(message.id, {
-        deliveryStatus: "sent",
-        providerMessageId: result.messageId,
-        sentAt: new Date().toISOString(),
-        incrementAttempts: true,
-      });
-    }
-
-    throw new Error(`Unsupported channel for outbound dispatch: ${message.channel}`);
+    providerMessageId = await sendViaProvider({
+      tenant,
+      message,
+      to,
+      from,
+      attachments,
+      attachmentCache,
+      headers,
+    });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
     return domain.updateMessageDeliveryStatus(message.id, {
       deliveryStatus: "failed",
-      deliveryError: errorMessage,
+      deliveryError: describeError(error),
       incrementAttempts: true,
     });
   }
+
+  // The provider has the message. Everything from here is bookkeeping, and it
+  // must not turn into "failed": 27 of a Notice's 203 emails were recorded
+  // that way on 2026-09-28 when this write lost to a connection outage after
+  // SES had accepted them - 23 were opened, and reside offered to resend all
+  // of them.
+  const sentAt = new Date().toISOString();
+  try {
+    return await recordWithRetry(() =>
+      domain.updateMessageDeliveryStatus(message.id, {
+        deliveryStatus: "sent",
+        providerMessageId,
+        sentAt,
+        incrementAttempts: true,
+      }),
+    );
+  } catch (error) {
+    console.error(
+      `[dispatch] message ${message.id} was accepted by the provider as ${providerMessageId} but recording it failed: ${describeError(error)}`,
+    );
+    // What the row would say had the write landed, so the caller records the
+    // send as sent rather than reading a stale "queued".
+    return {
+      ...message,
+      deliveryStatus: "sent",
+      providerMessageId: providerMessageId ?? null,
+      deliveryError: null,
+      sentAt: new Date(sentAt),
+      deliveryAttempts: message.deliveryAttempts + 1,
+    };
+  }
+}
+
+/** Hands the message to its channel's provider and returns the provider's id
+ * for it. Throws when the provider refuses it - the only case a send has
+ * actually failed. */
+async function sendViaProvider(params: {
+  tenant: Tenant;
+  message: Message;
+  to: string;
+  from?: string;
+  attachments?: EmailAttachmentRef[];
+  attachmentCache?: AttachmentFetchCache;
+  headers?: Record<string, string>;
+}): Promise<string | undefined> {
+  const { tenant, message, to, from, attachments, attachmentCache, headers } = params;
+
+  if (message.channel === "sms") {
+    const result = await sendSms({ to, from: tenant.twilioNumber, body: message.body });
+    return result.sid;
+  }
+
+  if (message.channel === "email") {
+    let html = withOpenTrackingPixel(message.body, message.id);
+    if (message.senderType === "internal_user") {
+      html = withMemberPortalLink(html, message.conversationId, tenant);
+    }
+    // Last, so the portal link above is tracked too, and so the pixel that
+    // withOpenTrackingPixel just appended is left alone - it is an <img>,
+    // and the rewriter only touches anchors. Same per-message identity the
+    // pixel uses: message.id is this recipient's own row, which is what
+    // makes a click attributable to a person rather than to a batch.
+    //
+    // The tenant's own reside host decides which links keep their URL and
+    // carry the token as a parameter, and which are wrapped in a redirect -
+    // a wrapped link can never open the reside mobile app. Same value the
+    // portal link above prefers, for the same reason: One Cardiff's
+    // residents are sent to One Cardiff's host, not a shared one.
+    html = withClickTracking(html, message.id, tenant.resideAppUrl);
+    // Resolved right before the send, not earlier - a bad or oversized
+    // attachment must never block the email itself (fetchEmailAttachments
+    // drops and logs rather than throwing), and there's no reason to pay
+    // the fetch cost on the sms branch above.
+    const fetchedAttachments = await fetchEmailAttachments(attachments, attachmentCache);
+    const result = await sendTenantReplyEmail({
+      to,
+      subject: message.subject ?? "",
+      text: html,
+      tenant,
+      from,
+      // Whatever the From would have been without the override - the
+      // tenant's inbound address. The override is a send-only identity, so
+      // without this a resident who hits Reply is writing into a void;
+      // with it the reply lands in the same mailbox, and threads into the
+      // same conversation, as it did before overrides existed.
+      //
+      // Derived here rather than sent by reside because this side owns the
+      // address: reside's copy of it is a cache that drifts if the value is
+      // edited in comm-canoe.
+      replyTo: from ? resolveMailFrom(tenant) : undefined,
+      // Reside always sends its rendered HTML (notification templates,
+      // notice bodies) as `body` - never plain text needing escaping.
+      isHtml: true,
+      attachments: fetchedAttachments.length > 0 ? fetchedAttachments : undefined,
+      headers,
+    });
+    return result.messageId;
+  }
+
+  throw new Error(`Unsupported channel for outbound dispatch: ${message.channel}`);
 }
