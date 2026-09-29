@@ -3,8 +3,20 @@ import nodemailer from "nodemailer";
 import { resolveMailFrom, type TenantMailFrom } from "./from";
 import type { FetchedEmailAttachment } from "./attachments";
 
-const region =
+export const SES_REGION =
   process.env.AMAZON_SES_REGION ?? process.env.AWS_REGION ?? "ca-central-1";
+const region = SES_REGION;
+
+/**
+ * The Message-ID SES stamps on an email it sent, for use in In-Reply-To /
+ * References. SES ignores any Message-ID we set and writes
+ * `<{MessageId}@{region}.amazonses.com>`, except us-east-1, which keeps the
+ * legacy `email.amazonses.com` host.
+ */
+export function sesMessageIdHeader(providerMessageId: string, sesRegion: string = SES_REGION): string {
+  const host = sesRegion === "us-east-1" ? "email.amazonses.com" : `${sesRegion}.amazonses.com`;
+  return `<${providerMessageId}@${host}>`;
+}
 
 let client: SESClient | null = null;
 

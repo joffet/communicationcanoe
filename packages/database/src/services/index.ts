@@ -684,6 +684,18 @@ export class DomainService {
     return message ?? null;
   }
 
+  /** The provider's id for one message, scoped by tenant so a caller-supplied
+   * id can never reach another building's message. Null when the message is
+   * missing, belongs to another tenant, or was never accepted by a provider. */
+  async getProviderMessageId(tenantId: TenantId, messageId: string): Promise<string | null> {
+    const [row] = await this.orm
+      .select({ providerMessageId: messages.providerMessageId })
+      .from(messages)
+      .where(and(eq(messages.id, messageId), eq(messages.tenantId, tenantId)))
+      .limit(1);
+    return row?.providerMessageId ?? null;
+  }
+
   async getMessageByProviderMessageId(providerMessageId: string): Promise<Message | null> {
     const [message] = await this.orm
       .select().from(messages)
@@ -856,7 +868,7 @@ export class DomainService {
     channel: "sms" | "email";
     subject?: string;
     body: string;
-    recipients: (IdentityContact & { unsubscribeUrl?: string })[];
+    recipients: (IdentityContact & { unsubscribeUrl?: string; inReplyToMessageId?: string })[];
     /** Overrides the tenant's From for every email in this batch. */
     from?: string;
     /** Attachment references for every email in this batch, stored verbatim -
@@ -894,6 +906,7 @@ export class DomainService {
           // the placeholder stripped, never left showing in a sent email.
           body: applyUnsubscribePlaceholder(input.body, identity.unsubscribeUrl),
           unsubscribeUrl: identity.unsubscribeUrl ?? null,
+          inReplyToMessageId: identity.inReplyToMessageId ?? null,
         })),
       );
 

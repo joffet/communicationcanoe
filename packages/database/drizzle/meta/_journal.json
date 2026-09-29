@@ -71,6 +71,13 @@
       "when": 1790133056579,
       "tag": "0009_worker_claim_sweeps",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790700733958,
+      "tag": "0010_outstanding_firebrand",
+      "breakpoints": true
     }
   ]
 }

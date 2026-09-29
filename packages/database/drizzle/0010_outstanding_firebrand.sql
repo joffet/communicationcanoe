@@ -1,0 +1,1 @@
+ALTER TABLE "outbound_batch_recipients" ADD COLUMN "in_reply_to_message_id" uuid;
