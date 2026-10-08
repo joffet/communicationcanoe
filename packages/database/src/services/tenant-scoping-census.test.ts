@@ -135,13 +135,13 @@ const CALLER_ENFORCED = [
 describe("tenant scoping census", () => {
   it("finds the service surface (sanity check that the parse works)", () => {
     const methods = publicMethods();
-    // All 102, including the seven with no return-type annotation. The three
+    // All 103, including the seven with no return-type annotation. The three
     // stranded-claim sweeps take a cutoff timestamp and no id of any kind, so
     // they are deliberately absent from CALLER_ENFORCED below - they are
     // cross-tenant maintenance by design, like
     // reclaimStuckOutboundBatchRecipients, not an unscoped read of one
     // tenant's row.
-    expect(methods.length).toBe(102);
+    expect(methods.length).toBe(103);
     expect(methods.map((m) => m.name)).toContain("getConversationsForTenant");
   });
 

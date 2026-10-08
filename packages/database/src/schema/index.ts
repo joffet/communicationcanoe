@@ -409,6 +409,12 @@ export const identities = pgTable(
       .default(0),
     emailFlaggedAt: timestamp("email_flagged_at", { withTimezone: true }),
     phoneFlaggedAt: timestamp("phone_flagged_at", { withTimezone: true }),
+    /**
+     * Set when reside anonymized the person behind this row (its 30-day
+     * account deletion). Name and contacts are placeholders from then on, and
+     * the finders skip the row so nothing writes a contact back onto it.
+     */
+    anonymizedAt: timestamp("anonymized_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

@@ -1,0 +1,1 @@
+ALTER TABLE "identities" ADD COLUMN "anonymized_at" timestamp with time zone;

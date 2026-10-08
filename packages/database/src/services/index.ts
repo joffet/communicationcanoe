@@ -7,7 +7,7 @@ import type {
   LogLiveTransferInput,
   ResideRenameIdentityInput,
 } from "@communication-canoe/shared";
-import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, sql, type SQL } from "drizzle-orm";
 import { createDb, type Db } from "../db";
 import { applyUnsubscribePlaceholder } from "../unsubscribe-placeholder";
 import {
@@ -36,6 +36,12 @@ import {
   outboundBatches,
 } from "../schema";
 import { normalizeEmail, normalizePhone } from "../client";
+import {
+  ANONYMIZED_RESIDENT_NAME,
+  UUID_PATTERN,
+  anonymizedIdentityEmail,
+  identityContactHashSql,
+} from "../anonymize";
 import { notifyDashboardConversation } from "../realtime/notify";
 import {
   createChatSessionToken,
@@ -519,6 +525,136 @@ export class DomainService {
 
     const final = await this.getCanonicalIdentity(canonical.id);
     return { identity: final, result: merged ? "merged" : "renamed" };
+  }
+
+  /**
+   * Reside anonymized a deleted person (30 days after the delete) and asks for
+   * their identity here to go too. Matched within this tenant by the reside
+   * resident id or by contact hash - reside sends SHA-256 hashes of the
+   * normalized email/phone rather than the values, which it has already
+   * erased on its side by the time a retry runs. See identityContactHash.
+   *
+   * Every row of each match's merge chain is scrubbed: a merged-away row keeps
+   * its contacts on purpose (merge history), so the canonical row alone would
+   * leave them behind. What the person wrote - message bodies, transcripts,
+   * summaries - stays as the building's record; only who they are goes.
+   *
+   * Idempotent: a scrubbed row has anonymized_at set, placeholder contacts and
+   * no resident id, so a repeat call matches nothing and returns 0.
+   */
+  async anonymizeIdentities(
+    tenantId: TenantId,
+    input: { resideResidentId?: string; contactHashes: string[] },
+  ): Promise<number> {
+    const residentId =
+      input.resideResidentId && UUID_PATTERN.test(input.resideResidentId) ? input.resideResidentId : null;
+    const hashes = input.contactHashes;
+    if (!residentId && hashes.length === 0) return 0;
+
+    return this.orm.transaction(async (tx) => {
+      const byResident = residentId ? sql`${identities.resideResidentId} = ${residentId}::uuid` : sql`false`;
+      const byHash = hashes.length
+        ? sql`(${inArray(identityContactHashSql(identities.email), hashes)} or ${inArray(identityContactHashSql(identities.phone), hashes)})`
+        : sql`false`;
+      const matches = await tx
+        .select({ id: identities.id })
+        .from(identities)
+        .where(and(
+          eq(identities.tenantId, tenantId),
+          isNull(identities.anonymizedAt),
+          sql`(${byResident} or ${byHash})`,
+        ));
+      if (matches.length === 0) return 0;
+
+      const chained = new Set<string>();
+      for (const { id } of matches) {
+        const result = (await tx.execute(
+          sql`SELECT * FROM identity_merge_chain_ids(${id}::uuid)`,
+        )) as { rows: Array<{ identity_merge_chain_ids: string }> };
+        for (const row of result.rows) chained.add(row.identity_merge_chain_ids);
+      }
+      // The chain function walks merged_into_id without looking at tenants.
+      // A merge never crosses one, but this is the place that would make it
+      // matter, so the set is narrowed to this tenant again here.
+      const scoped = await tx
+        .select({ id: identities.id })
+        .from(identities)
+        .where(and(
+          eq(identities.tenantId, tenantId),
+          inArray(identities.id, [...chained]),
+          isNull(identities.anonymizedAt),
+        ));
+      const ids = scoped.map((row) => row.id);
+      if (ids.length === 0) return 0;
+
+      const now = new Date();
+      for (const id of ids) {
+        await tx
+          .update(identities)
+          .set({
+            name: ANONYMIZED_RESIDENT_NAME,
+            email: anonymizedIdentityEmail(id),
+            phone: null,
+            resideResidentId: null,
+            emailConsecutiveFailures: 0,
+            phoneConsecutiveFailures: 0,
+            emailFlaggedAt: null,
+            phoneFlaggedAt: null,
+            anonymizedAt: now,
+          })
+          .where(and(eq(identities.tenantId, tenantId), eq(identities.id, id)));
+      }
+
+      await tx
+        .update(identityConversionLogs)
+        .set({ capturedName: null, capturedEmail: null, capturedPhone: null })
+        .where(and(eq(identityConversionLogs.tenantId, tenantId), inArray(identityConversionLogs.identityId, ids)));
+
+      const owned = await tx
+        .select({ id: conversationsTable.id })
+        .from(conversationsTable)
+        .where(and(eq(conversationsTable.tenantId, tenantId), inArray(conversationsTable.identityId, ids)));
+      const conversationIds = new Set<string>();
+      for (const { id } of owned) {
+        const result = (await tx.execute(
+          sql`SELECT * FROM conversation_merge_chain_ids(${id}::uuid)`,
+        )) as { rows: Array<{ conversation_merge_chain_ids: string }> };
+        for (const row of result.rows) conversationIds.add(row.conversation_merge_chain_ids);
+      }
+
+      if (conversationIds.size > 0) {
+        // Provider diagnostics quote the address ("550 5.1.1 <ada@...>: no
+        // such user"). The body of what was said stays; the error text goes.
+        await tx
+          .update(messages)
+          .set({ deliveryError: "redacted" })
+          .where(and(
+            eq(messages.tenantId, tenantId),
+            inArray(messages.conversationId, [...conversationIds]),
+            isNotNull(messages.deliveryError),
+          ));
+      }
+
+      const recipientMatch = [
+        residentId ? sql`${outboundBatchRecipients.identityContact}->>'resideResidentId' = ${residentId}` : null,
+        conversationIds.size > 0
+          ? sql`${outboundBatchRecipients.messageId} in (select ${messages.id} from ${messages} where ${inArray(messages.conversationId, [...conversationIds])})`
+          : null,
+      ].filter((clause): clause is SQL => clause !== null);
+      if (recipientMatch.length > 0) {
+        // The per-recipient body is kept like any sent message. The contact
+        // jsonb is what named them, so it is replaced outright.
+        await tx
+          .update(outboundBatchRecipients)
+          .set({ identityContact: { name: ANONYMIZED_RESIDENT_NAME }, unsubscribeUrl: null })
+          .where(and(
+            eq(outboundBatchRecipients.tenantId, tenantId),
+            sql`(${sql.join(recipientMatch, sql` or `)})`,
+          ));
+      }
+
+      return ids.length;
+    });
   }
 
   /** Phase 9: this used to assume at most one open conversation per
@@ -2765,6 +2901,9 @@ export class DomainService {
         eq(identities.tenantId, tenantId),
         eq(identities.phone, phone),
         isNull(identities.mergedIntoId),
+        // Anonymized rows are out of reach: matching one would let
+        // findOrCreateIdentity write a contact back onto a deleted person.
+        isNull(identities.anonymizedAt),
       ))
       .limit(1);
     return identity ?? null;
@@ -2778,6 +2917,7 @@ export class DomainService {
         eq(identities.tenantId, tenantId),
         eq(identities.email, email),
         isNull(identities.mergedIntoId),
+        isNull(identities.anonymizedAt),
       ))
       .limit(1);
     return identity ?? null;
@@ -2795,6 +2935,7 @@ export class DomainService {
         eq(identities.tenantId, tenantId),
         eq(identities.resideResidentId, resideResidentId),
         isNull(identities.mergedIntoId),
+        isNull(identities.anonymizedAt),
       ))
       .limit(1);
     return identity ?? null;

@@ -1,7 +1,9 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { DomainService } from "./index";
 import { createTestDb, resetTestDb, type TestDb } from "../testing/pglite";
-import { tenants } from "../schema";
+import { conversations, identities, identityConversionLogs, messages, outboundBatchRecipients, tenants } from "../schema";
+import { identityContactHash } from "../anonymize";
+import { eq } from "drizzle-orm";
 import { asResideClientUid } from "@communication-canoe/shared/brands";
 
 let db: TestDb;
@@ -322,5 +324,157 @@ describe("renameIdentity", () => {
     expect(outcome).toBeNull();
     const untouched = await priv().getCanonicalIdentity(inB.id);
     expect(untouched.email).toBe("shared@example.test");
+  });
+});
+
+describe("anonymizeIdentities", () => {
+  const RESIDENT = "44444444-4444-4444-8444-444444444444";
+
+  async function seedPerson(tenantId: Parameters<DomainService["findOrCreateIdentity"]>[0]) {
+    const identity = await domain.findOrCreateIdentity(tenantId, {
+      email: "Ada@Example.test",
+      phone: "(416) 555-1111",
+      name: "Ada Lovelace",
+      resideResidentId: RESIDENT,
+    });
+    const [conversation] = await db.insert(conversations).values({
+      tenantId, identityId: identity.id, status: "open",
+    }).returning();
+    const message = await domain.appendMessage({
+      tenantId, conversationId: conversation.id, channel: "email", direction: "outbound",
+      senderType: "system", body: "Your parcel is at the desk",
+    });
+    await db.update(messages).set({ deliveryError: "550 5.1.1 <ada@example.test>: no such user" })
+      .where(eq(messages.id, message.id));
+    return { identity, conversation, message };
+  }
+
+  const hashOf = (value: string) => identityContactHash(value);
+
+  it("matches by reside resident id and replaces name and contacts with placeholders", async () => {
+    const tenant = await makeTenant();
+    const { identity } = await seedPerson(tenant.id);
+
+    const count = await domain.anonymizeIdentities(tenant.id, { resideResidentId: RESIDENT, contactHashes: [] });
+
+    expect(count).toBe(1);
+    const [row] = await db.select().from(identities).where(eq(identities.id, identity.id));
+    expect(row).toMatchObject({
+      name: "Deleted resident",
+      email: `deleted.${identity.id}@anonymized.invalid`,
+      phone: null,
+      resideResidentId: null,
+      emailConsecutiveFailures: 0,
+      phoneConsecutiveFailures: 0,
+      emailFlaggedAt: null,
+      phoneFlaggedAt: null,
+    });
+    expect(row.anonymizedAt).toBeInstanceOf(Date);
+  });
+
+  it("matches by email hash alone", async () => {
+    const tenant = await makeTenant();
+    const { identity } = await seedPerson(tenant.id);
+
+    expect(await domain.anonymizeIdentities(tenant.id, { contactHashes: [hashOf("ada@example.test")] })).toBe(1);
+    const [row] = await db.select().from(identities).where(eq(identities.id, identity.id));
+    expect(row.anonymizedAt).not.toBeNull();
+  });
+
+  it("matches by phone hash alone", async () => {
+    const tenant = await makeTenant();
+    const { identity } = await seedPerson(tenant.id);
+
+    expect(await domain.anonymizeIdentities(tenant.id, { contactHashes: [hashOf("+14165551111")] })).toBe(1);
+    const [row] = await db.select().from(identities).where(eq(identities.id, identity.id));
+    expect(row.anonymizedAt).not.toBeNull();
+  });
+
+  it("ignores a resident id that is not a UUID rather than failing the cast", async () => {
+    const tenant = await makeTenant();
+    await seedPerson(tenant.id);
+
+    expect(await domain.anonymizeIdentities(tenant.id, { resideResidentId: "cardiff-1301-a", contactHashes: [] })).toBe(0);
+  });
+
+  it("scrubs every row of a merge chain, including merged-away rows that kept their contacts", async () => {
+    const tenant = await makeTenant();
+    const keep = await domain.findOrCreateIdentity(tenant.id, { email: "ada@example.test" });
+    const [byPhone] = await db.insert(identities).values({ tenantId: tenant.id, phone: "+14165551111" }).returning();
+    const [byWork] = await db.insert(identities).values({ tenantId: tenant.id, email: "ada@work.test" }).returning();
+    await priv().mergeIdentities(tenant.id, keep.id, byPhone.id, "phone");
+    await priv().mergeIdentities(tenant.id, keep.id, byWork.id, "email");
+
+    // Only the phone is known; the chain carries the rest.
+    const count = await domain.anonymizeIdentities(tenant.id, { contactHashes: [hashOf("+14165551111")] });
+
+    expect(count).toBe(3);
+    const rows = await db.select().from(identities).where(eq(identities.tenantId, tenant.id));
+    for (const row of rows) {
+      expect(row.anonymizedAt).not.toBeNull();
+      expect(row.phone).toBeNull();
+      expect(row.email).toBe(`deleted.${row.id}@anonymized.invalid`);
+    }
+  });
+
+  it("keeps message bodies and redacts provider errors that quote the address", async () => {
+    const tenant = await makeTenant();
+    const { message } = await seedPerson(tenant.id);
+
+    await domain.anonymizeIdentities(tenant.id, { resideResidentId: RESIDENT, contactHashes: [] });
+
+    const [row] = await db.select().from(messages).where(eq(messages.id, message.id));
+    expect(row.body).toBe("Your parcel is at the desk");
+    expect(row.deliveryError).toBe("redacted");
+  });
+
+  it("clears conversion-log captures and batch recipient contacts, keeping the sent body", async () => {
+    const tenant = await makeTenant();
+    const anon = await domain.findOrCreateAnonymousIdentity(tenant.id, {});
+    await domain.convertIdentity(anon.id, tenant.id, { email: "ada@example.test", name: "Ada" });
+    const batch = await domain.createOutboundBatch({
+      tenantId: tenant.id, channel: "email", subject: "Water shut-off", body: "Water is off at 10. {{unsubscribe_url}}",
+      recipients: [{ email: "ada@example.test", name: "Ada", resideResidentId: RESIDENT, unsubscribeUrl: "https://x.test/u/abc" }],
+    });
+
+    await domain.anonymizeIdentities(tenant.id, {
+      resideResidentId: RESIDENT, contactHashes: [hashOf("ada@example.test")],
+    });
+
+    const [log] = await db.select().from(identityConversionLogs).where(eq(identityConversionLogs.tenantId, tenant.id));
+    expect(log).toMatchObject({ capturedName: null, capturedEmail: null, capturedPhone: null });
+    const [recipient] = await db.select().from(outboundBatchRecipients).where(eq(outboundBatchRecipients.batchId, batch.id));
+    expect(recipient.identityContact).toEqual({ name: "Deleted resident" });
+    expect(recipient.unsubscribeUrl).toBeNull();
+    expect(recipient.body).toContain("Water is off at 10.");
+  });
+
+  it("is idempotent: a second call finds nothing left to do", async () => {
+    const tenant = await makeTenant();
+    await seedPerson(tenant.id);
+    const input = { resideResidentId: RESIDENT, contactHashes: [hashOf("ada@example.test"), hashOf("+14165551111")] };
+
+    expect(await domain.anonymizeIdentities(tenant.id, input)).toBe(1);
+    expect(await domain.anonymizeIdentities(tenant.id, input)).toBe(0);
+  });
+
+  it("does nothing without a resident id or a hash", async () => {
+    const tenant = await makeTenant();
+    await seedPerson(tenant.id);
+    expect(await domain.anonymizeIdentities(tenant.id, { contactHashes: [] })).toBe(0);
+  });
+
+  it("never writes a contact back onto an anonymized row: a new inbound creates a new identity", async () => {
+    const tenant = await makeTenant();
+    const { identity } = await seedPerson(tenant.id);
+    await domain.anonymizeIdentities(tenant.id, { resideResidentId: RESIDENT, contactHashes: [] });
+
+    const fresh = await domain.findOrCreateIdentity(tenant.id, { phone: "+14165551111", name: "Ada again" });
+
+    expect(fresh.id).not.toBe(identity.id);
+    const [old] = await db.select().from(identities).where(eq(identities.id, identity.id));
+    expect(old.phone).toBeNull();
+    expect(old.name).toBe("Deleted resident");
+    expect(await domain.findIdentityForContact(tenant.id, { phone: "+14165551111" })).toMatchObject({ id: fresh.id });
   });
 });

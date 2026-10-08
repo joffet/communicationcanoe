@@ -36,6 +36,7 @@ import {
   users,
 } from "../schema";
 import { asResideClientUid } from "@communication-canoe/shared/brands";
+import { identityContactHash } from "../anonymize";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -314,6 +315,64 @@ describe("writes cannot reach across the boundary", () => {
 
     const [row] = await db.select().from(identities).where(eq(identities.id, b.identity.id));
     expect(row.email).toBe(b.identity.email);
+  });
+});
+
+describe("anonymizing a person stays inside the tenant", () => {
+  // The same human contacting two buildings is two identities, with the same
+  // email, phone and reside resident id (unique per tenant, not globally).
+  // Anonymizing them in A is reside acting for A's building; B's copy is B's.
+  const RESIDENT = "55555555-5555-4555-8555-555555555555";
+  const EMAIL = "shared.person@example.test";
+  const PHONE = "+14165559999";
+
+  async function seedSharedPerson(world: World) {
+    const [identity] = await db
+      .insert(identities)
+      .values({ tenantId: world.tenant.id, email: EMAIL, phone: PHONE, name: "Shared Person", resideResidentId: RESIDENT })
+      .returning();
+    const [conversation] = await db
+      .insert(conversations)
+      .values({ tenantId: world.tenant.id, identityId: identity.id, status: "open" })
+      .returning();
+    const [message] = await db
+      .insert(messages)
+      .values({
+        tenantId: world.tenant.id, conversationId: conversation.id, channel: "email", direction: "outbound",
+        senderType: "system", body: "Notice", deliveryError: `550 <${EMAIL}>`, idempotencyKey: `shared-${world.tenant.id}`,
+      })
+      .returning();
+    const [recipient] = await db
+      .insert(outboundBatchRecipients)
+      .values({
+        tenantId: world.tenant.id, batchId: world.batch.id, channel: "email",
+        identityContact: { email: EMAIL, resideResidentId: RESIDENT }, body: "Notice", status: "sent",
+      })
+      .returning();
+    return { identity, message, recipient };
+  }
+
+  it("anonymizeIdentities leaves another tenant's identical person byte-identical", async () => {
+    const mineA = await seedSharedPerson(a);
+    const theirsB = await seedSharedPerson(b);
+
+    const count = await domain.anonymizeIdentities(a.tenant.id, {
+      resideResidentId: RESIDENT,
+      contactHashes: [identityContactHash(EMAIL), identityContactHash(PHONE)],
+    });
+
+    expect(count).toBe(1);
+    const [scrubbed] = await db.select().from(identities).where(eq(identities.id, mineA.identity.id));
+    expect(scrubbed.anonymizedAt).not.toBeNull();
+
+    const [identityB] = await db.select().from(identities).where(eq(identities.id, theirsB.identity.id));
+    expect(identityB).toEqual(theirsB.identity);
+    const [messageB] = await db.select().from(messages).where(eq(messages.id, theirsB.message.id));
+    expect(messageB.deliveryError).toBe(theirsB.message.deliveryError);
+    const [recipientB] = await db.select().from(outboundBatchRecipients).where(eq(outboundBatchRecipients.id, theirsB.recipient.id));
+    expect(recipientB.identityContact).toEqual(theirsB.recipient.identityContact);
+    const [baselineB] = await db.select().from(identities).where(eq(identities.id, b.identity.id));
+    expect(baselineB).toEqual(b.identity);
   });
 });
 
