@@ -457,6 +457,19 @@ export const resideRenameIdentityInputSchema = z.object({
     .optional(),
 });
 
+/** Reside's 30-day anonymizer asking for a deleted person to be removed here.
+ * Contacts arrive only as hashes (lowercase hex SHA-256 of the normalized
+ * value - see packages/database/src/anonymize.ts): reside has erased the values
+ * themselves by the time a retry runs. */
+const contactHashesSchema = z.array(z.string().regex(/^[0-9a-f]{64}$/)).max(50);
+export const resideAnonymizeSubjectInputSchema = z.object({
+  tenantId: z.string().min(1).transform(asResideClientUid),
+  subject: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("resident"), resideResidentId: z.string().min(1), contactHashes: contactHashesSchema }),
+    z.object({ kind: z.literal("user"), resideUserId: z.string().min(1), contactHashes: contactHashesSchema }),
+  ]),
+});
+
 export type ResideActorClaims = z.infer<typeof resideActorSchema>;
 export type ResideAddTagInput = z.infer<typeof resideAddTagInputSchema>;
 export type ResideAssigneeInput = z.infer<typeof resideAssigneeInputSchema>;
@@ -482,3 +495,4 @@ export type ResideSendMessageInput = z.infer<typeof resideSendMessageInputSchema
 export type ResideSendBulkMessageInput = z.infer<typeof resideSendBulkMessageInputSchema>;
 export type ResideCreateKnowledgeDocumentInput = z.infer<typeof resideCreateKnowledgeDocumentInputSchema>;
 export type ResideRenameIdentityInput = z.infer<typeof resideRenameIdentityInputSchema>;
+export type ResideAnonymizeSubjectInput = z.infer<typeof resideAnonymizeSubjectInputSchema>;
