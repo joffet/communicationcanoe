@@ -9,7 +9,7 @@ tenant wired end to end; every step applies to the next building the same way.
 
 | Channel | Provider points at | Then |
 |---|---|---|
-| SMS | Twilio number `sms_url` → reside `https://<building domain>/api/sms/inbound` | reside handles STOP/START (per-event opt-outs) and forwards every other text to comm-canoe `POST /api/internal/reside/inbound/sms` (`x-reside-secret`) |
+| SMS | Twilio number `sms_url` → reside `https://<building domain>/api/sms/inbound` | reside handles STOP/START (SMS opt-outs) and forwards every other text to comm-canoe `POST /api/internal/reside/inbound/sms` (`x-reside-secret`) |
 | Voice | Twilio number `voice_url` → `https://api.communicationcanoe.com/api/webhooks/twilio/voice` | voicemail: `recording-status` stores the recording, the realtime-bridge worker transcribes it |
 | Email | building MX (forwardemail.net for onecardiff.ca) → alias forwards to the Postmark inbound address | Postmark → `POST /api/webhooks/postmark/inbound` |
 

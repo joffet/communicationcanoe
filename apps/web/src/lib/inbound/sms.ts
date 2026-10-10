@@ -32,21 +32,33 @@ export async function ingestInboundSms(
     channel: "sms",
   });
 
-  const message = await domain.appendMessage({
-    tenantId,
-    conversationId: conversation.id,
-    channel: "sms",
-    direction: "inbound",
-    senderType: "external",
-    body,
-    // Came directly from the customer.
-    visibility: "external",
-    idempotencyKey,
-    // Phase 9: flags this message for the async AI topic-shift check when
-    // the conversation it landed in had gone quiet past the tenant's
-    // staleness threshold - never blocks this response on an AI call.
-    ...(isStale && { topicCheckStatus: "pending" }),
-  });
+  let message;
+  try {
+    message = await domain.appendMessage({
+      tenantId,
+      conversationId: conversation.id,
+      channel: "sms",
+      direction: "inbound",
+      senderType: "external",
+      body,
+      // Came directly from the customer.
+      visibility: "external",
+      idempotencyKey,
+      // Phase 9: flags this message for the async AI topic-shift check when
+      // the conversation it landed in had gone quiet past the tenant's
+      // staleness threshold - never blocks this response on an AI call.
+      ...(isStale && { topicCheckStatus: "pending" }),
+    });
+  } catch (error) {
+    // reside retries a forward that timed out, so the retry can race the
+    // first attempt past the check above; the unique index turns the loser's
+    // insert into an error. If the winner's row is there, this was a duplicate.
+    const existing = idempotencyKey
+      ? await domain.getMessageByIdempotencyKey(tenantId, idempotencyKey)
+      : null;
+    if (!existing) throw error;
+    return { conversationId: existing.conversationId, messageId: existing.id, deduplicated: true };
+  }
 
   void triggerConversationRouting(conversation.id, tenantId).catch(console.error);
 
