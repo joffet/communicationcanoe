@@ -145,12 +145,22 @@ When adding a user from admin, the **Send sign-in email** toggle (default on) se
 
 ### Twilio SMS
 
-- URL: `POST {NEXT_PUBLIC_APP_URL}/api/webhooks/twilio/sms`
-- Validates `X-Twilio-Signature` when `TWILIO_AUTH_TOKEN` is set.
+Tenants' numbers point their **SMS** webhook at reside (`https://<building domain>/api/sms/inbound`), not here: reside owns STOP/START (SMS opt-outs) and forwards every other text to `POST /api/internal/reside/inbound/sms` (`x-reside-secret`, idempotent on Twilio's `MessageSid`). Both that route and the direct webhook below land messages through `apps/web/src/lib/inbound/sms.ts`.
+
+- Direct URL (unused while reside fronts SMS): `POST {NEXT_PUBLIC_APP_URL}/api/webhooks/twilio/sms`
+- Validates `X-Twilio-Signature` against the global `TWILIO_AUTH_TOKEN` and a URL built from `NEXT_PUBLIC_APP_URL`, so the number must live in that Twilio account and the configured URL must match byte for byte.
+
+### Twilio Voice
+
+- Number's voice URL: `POST {NEXT_PUBLIC_APP_URL}/api/webhooks/twilio/voice` (same signature rules as SMS).
 
 ### Postmark Inbound
 
-- URL: `POST {NEXT_PUBLIC_APP_URL}/api/webhooks/postmark/inbound`
+- URL: `POST https://postmark:<POSTMARK_INBOUND_WEBHOOK_SECRET>@<host>/api/webhooks/postmark/inbound`
+- Fails closed: with `POSTMARK_INBOUND_WEBHOOK_SECRET` unset every request is refused.
+- The tenant is the first To/Cc/Bcc address matching a tenant's `inbound_email_address`, so mail forwarded to Postmark from the building's own domain (headers unchanged) resolves to that building.
+
+Per-tenant setup and verification: [docs/inbound-routing-runbook.md](docs/inbound-routing-runbook.md).
 
 ## AI Features
 

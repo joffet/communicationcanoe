@@ -1,12 +1,34 @@
+import { timingSafeEqual } from "node:crypto";
 import { createDomainService } from "@communication-canoe/database";
 import { parsePostmarkInbound } from "@communication-canoe/shared/email";
 import { triggerConversationRouting } from "@/lib/ai/routing";
 
+function secretMatches(secret: string, provided: string | null | undefined): boolean {
+  if (!provided) return false;
+  const a = Buffer.from(secret);
+  const b = Buffer.from(provided);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * Postmark's inbound webhook authenticates with HTTP basic auth written into
+ * the webhook URL (https://postmark:<secret>@host/api/webhooks/postmark/inbound);
+ * the password is the secret, the username is ignored. The
+ * x-postmark-webhook-secret header is still accepted for anything already
+ * configured that way. Fails closed: an unset secret means no access - an open
+ * endpoint would let anyone post mail into any tenant's inbox.
+ */
 function verifyPostmarkWebhook(request: Request): boolean {
   const secret = process.env.POSTMARK_INBOUND_WEBHOOK_SECRET;
-  if (!secret) return true;
-  const header = request.headers.get("x-postmark-webhook-secret");
-  return header === secret;
+  if (!secret) return false;
+
+  if (secretMatches(secret, request.headers.get("x-postmark-webhook-secret"))) return true;
+
+  const auth = request.headers.get("authorization");
+  if (!auth?.startsWith("Basic ")) return false;
+  const decoded = Buffer.from(auth.slice("Basic ".length), "base64").toString("utf8");
+  const password = decoded.slice(decoded.indexOf(":") + 1);
+  return decoded.includes(":") && secretMatches(secret, password);
 }
 
 export async function POST(request: Request) {
@@ -22,7 +44,14 @@ export async function POST(request: Request) {
   }
 
   const domain = createDomainService();
-  const tenant = await domain.resolveTenantByEmail(email.to);
+  // First recipient that is a tenant's inbound address wins - a resident who
+  // writes to their building with someone else first in To, or with the
+  // building in Cc, still reaches it.
+  let tenant = null;
+  for (const address of email.recipients ?? [email.to]) {
+    tenant = await domain.resolveTenantByEmail(address);
+    if (tenant) break;
+  }
   if (!tenant) {
     return new Response("Unknown tenant email", { status: 404 });
   }
