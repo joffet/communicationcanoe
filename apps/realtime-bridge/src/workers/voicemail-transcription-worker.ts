@@ -1,5 +1,6 @@
-import { type TenantId, createDomainService } from "@communication-canoe/database";
+import { type TenantId, createAdminService, createDomainService } from "@communication-canoe/database";
 import type { DomainService } from "@communication-canoe/database";
+import { notifyResideVoicemail } from "../reside/notify-voicemail.js";
 import { createTranscriptionProvider, routeConversation } from "@communication-canoe/shared/ai";
 import { loadConfig } from "../config.js";
 import { startPollLoop } from "./poll-loop.js";
@@ -86,6 +87,11 @@ async function transcribePendingVoicemails(): Promise<boolean> {
 
       await domain.updateMessageTranscription(id, transcript);
 
+      // The conversation lives in reside now: hand the voicemail over with
+      // its transcript. Best-effort, after the transcript is saved here, so
+      // a reside outage costs a notice and not the transcription.
+      await handToReside(domain, id, transcript);
+
       // Team-classification routing, now that real content exists (not at
       // placeholder-creation time). Inlined rather than imported - the
       // original apps/web/src/lib/ai/routing.ts's triggerConversationRouting
@@ -106,10 +112,46 @@ async function transcribePendingVoicemails(): Promise<boolean> {
         .catch((innerErr) => {
           console.error(`[voicemail-transcription-worker] failed to record failure for ${id}:`, innerErr);
         });
+      // A voicemail nobody could transcribe is still a voicemail the office
+      // should hear: reside gets the recording with no transcript.
+      await handToReside(domain, id, null);
     }
   }
 
   return true;
+}
+
+/**
+ * Posts one voicemail to reside's inbox. Keyed on the comm-canoe message id
+ * (the recording webhook stores no CallSid), which is just as stable: reside
+ * dedupes on it, so a tick that re-runs after a crash cannot file it twice.
+ * Never throws: the caller's loop treats a failure here like any other
+ * best-effort notify.
+ */
+async function handToReside(domain: DomainService, messageId: string, transcript: string | null): Promise<void> {
+  try {
+    const message = await domain.getMessageById(messageId);
+    if (!message?.audioUrl) return;
+    const [thread, tenant] = await Promise.all([
+      domain.getConversationThread(message.conversationId),
+      createAdminService().getTenantById(message.tenantId),
+    ]);
+    const from = thread?.identity.phone;
+    if (!tenant || !from) {
+      console.warn(`[voicemail-transcription-worker] message ${messageId}: no tenant or caller number; not handed to reside`);
+      return;
+    }
+    await notifyResideVoicemail({
+      resideClientUid: tenant.resideClientUid,
+      from,
+      to: tenant.twilioNumber,
+      recordingUrl: message.audioUrl,
+      transcript,
+      callSid: message.id,
+    });
+  } catch (err) {
+    console.error(`[voicemail-transcription-worker] message ${messageId}: hand-off to reside failed:`, err);
+  }
 }
 
 /** Structural copy of apps/web/src/lib/ai/routing.ts's triggerConversationRouting -

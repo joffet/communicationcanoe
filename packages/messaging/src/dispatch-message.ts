@@ -75,9 +75,13 @@ export async function dispatchOutboundMessage(params: {
    * a retry replayed from its outbox - which has no column for them - simply
    * sends without. Ignored for SMS. */
   headers?: Record<string, string>;
+  /** An explicit Reply-To for the email path, winning over the derived one
+   * in sendViaProvider. reside's inbox threads replies through it - see
+   * resideSendMessageInputSchema.replyTo. Not persisted; ignored for SMS. */
+  replyTo?: string;
 }): Promise<Message> {
   const domain = createDomainService();
-  const { tenant, message, to, from, attachments, attachmentCache, headers } = params;
+  const { tenant, message, to, from, attachments, attachmentCache, headers, replyTo } = params;
 
   let providerMessageId: string | undefined;
   try {
@@ -89,6 +93,7 @@ export async function dispatchOutboundMessage(params: {
       attachments,
       attachmentCache,
       headers,
+      replyTo,
     });
   } catch (error) {
     return domain.updateMessageDeliveryStatus(message.id, {
@@ -141,8 +146,9 @@ async function sendViaProvider(params: {
   attachments?: EmailAttachmentRef[];
   attachmentCache?: AttachmentFetchCache;
   headers?: Record<string, string>;
+  replyTo?: string;
 }): Promise<string | undefined> {
-  const { tenant, message, to, from, attachments, attachmentCache, headers } = params;
+  const { tenant, message, to, from, attachments, attachmentCache, headers, replyTo } = params;
 
   if (message.channel === "sms") {
     const result = await sendSms({ to, from: tenant.twilioNumber, body: message.body });
@@ -186,7 +192,7 @@ async function sendViaProvider(params: {
       // Derived here rather than sent by reside because this side owns the
       // address: reside's copy of it is a cache that drifts if the value is
       // edited in comm-canoe.
-      replyTo: from ? resolveMailFrom(tenant) : undefined,
+      replyTo: replyTo ?? (from ? resolveMailFrom(tenant) : undefined),
       // Reside always sends its rendered HTML (notification templates,
       // notice bodies) as `body` - never plain text needing escaping.
       isHtml: true,

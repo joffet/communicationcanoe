@@ -28,6 +28,7 @@ export async function POST(request: Request) {
     deliverTo,
     newConversation,
     headers,
+    replyTo,
   } = parsed.data;
 
   // An inbox message is not going anywhere, so it needs no destination. Every
@@ -134,7 +135,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "no destination for a channel send" }, { status: 400 });
   }
 
-  const sent = await dispatchOutboundMessage({ tenant, message, to, from, attachments, headers });
+  const sent = await dispatchOutboundMessage({ tenant, message, to, from, attachments, headers, replyTo });
 
   return Response.json({
     message: {
