@@ -169,8 +169,21 @@ export const resideSendMessageInputSchema = z
       .object({
         "List-Unsubscribe": z.string().min(1).optional(),
         "List-Unsubscribe-Post": z.string().min(1).optional(),
+        /** reside's inbox replies: what the resident's mail client threads
+         * on. Message-ID references only - still no Bcc, From or
+         * Return-Path. */
+        "In-Reply-To": z.string().min(1).max(998).optional(),
+        References: z.string().min(1).max(4000).optional(),
       })
       .optional(),
+    /**
+     * An explicit Reply-To. reside's inbox sets it to a plus address that
+     * carries the conversation uid (`info+c-<uid>@building.ca`), so a reply
+     * threads onto the right conversation even when the client strips every
+     * header. Wins over the derived one (`from` override -> tenant inbound
+     * address). A bare address or `Name <address>`.
+     */
+    replyTo: z.string().min(3).max(320).optional(),
     deliverTo: z.enum(["channel", "inbox"]).default("channel"),
     /**
      * Start a fresh thread rather than continuing whichever one is open.
