@@ -18,8 +18,8 @@ export type ResideVoicemailNotice = {
  * Hands a voicemail to reside once it is transcribed (or once transcription
  * gave up), so it lands in the caller's conversation in reside's inbox - the
  * conversation lives there, not here (reside's docs/inbox-overhaul-plan.md,
- * comm-canoe change 2). Same shape as notify-response-overdue.ts, plus a
- * retry on 5xx and network failure: reside answers inside its webhook budget,
+ * comm-canoe change 2). Retries on 5xx and network failure: reside answers
+ * inside its webhook budget,
  * so a 5xx is a deploy or a database hiccup, not a bad request. A 4xx is
  * final - reside refused the payload or the tenant, and sending it again
  * changes nothing. Never throws into the worker.
