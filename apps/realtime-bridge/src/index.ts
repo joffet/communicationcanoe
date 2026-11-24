@@ -25,7 +25,6 @@ import { dashboardHub } from "./realtime/dashboard-hub.js";
 import { handleTwilioStreamConnection } from "./routes/twilio-stream.js";
 import { startOutboundBatchWorker } from "./workers/outbound-batch-worker.js";
 import { startScheduledMessageWorker } from "./workers/scheduled-message-worker.js";
-import { startOverdueConversationWorker } from "./workers/overdue-conversation-worker.js";
 import { startToneReviewWorker } from "./workers/tone-review-worker.js";
 import { startConversationRoutingWorker } from "./workers/conversation-routing-worker.js";
 import { startDocumentIngestionWorker } from "./workers/document-ingestion-worker.js";
@@ -149,7 +148,6 @@ server.listen(config.port, () => {
 
 startOutboundBatchWorker();
 startScheduledMessageWorker();
-startOverdueConversationWorker();
 startToneReviewWorker();
 startConversationRoutingWorker();
 startDocumentIngestionWorker();
