@@ -46,6 +46,10 @@ async function syncAppUser(user: { id: string; email: string; name: string }) {
 export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL ?? process.env.NEXT_PUBLIC_APP_URL,
+  // The original hostname remains trusted while both UI hosts serve traffic.
+  trustedOrigins: process.env.NEXT_PUBLIC_APP_URL
+    ? [new URL(process.env.NEXT_PUBLIC_APP_URL).origin]
+    : [],
   database: pool,
   plugins: [
     admin({
