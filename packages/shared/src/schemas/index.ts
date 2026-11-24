@@ -399,13 +399,6 @@ export const resideMemberThreadInputSchema = z.object({
   contact: identityContactSchema,
 });
 
-export const resideMemberReplyInputSchema = z.object({
-  tenantId: z.string().min(1).transform(asResideClientUid),
-  contact: identityContactSchema,
-  channel: z.enum(["sms", "email"]),
-  body: z.string().min(1),
-});
-
 // ---- Phase 5: tenant-settings updates from reside ----
 // Only the two fields reside needs to configure - not the full tenant_settings
 // surface (greeting_message/business_hours/bounce_threshold etc. aren't
