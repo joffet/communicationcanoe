@@ -188,7 +188,10 @@ Per-tenant setup and verification: [docs/inbound-routing-runbook.md](docs/inboun
 - **Railway:** deploy `apps/web` and `apps/realtime-bridge` as separate services.
 - **PlanetScale:** Postgres for all app data; migrations run with `MIGRATION_DATABASE_URL`, the app with `DATABASE_URL`.
 - **Realtime:** served by `apps/realtime-bridge` itself. `REALTIME_BRIDGE_PUBLIC_WS_URL` must be the browser-reachable `wss://` URL of that service, and `INTERNAL_API_SECRET` must match across both.
-- Set `BETTER_AUTH_URL` and `NEXT_PUBLIC_APP_URL` to your production URL.
+- Set `BETTER_AUTH_URL` to the public UI origin so new magic links reach the
+  auth handler. Browser authentication uses the current UI origin. Keep
+  `NEXT_PUBLIC_APP_URL` set to the canonical tracking and provider callback
+  origin while those URLs remain active.
 
 ## Out of Scope (This Milestone)
 
