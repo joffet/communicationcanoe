@@ -4,7 +4,6 @@ import { magicLink } from "better-auth/plugins";
 import { Pool } from "pg";
 import { sendMagicLinkEmail } from "@/lib/email/magic-link";
 import { consumeInviteEmailVariant } from "@/lib/email/invite-email-context";
-import { resideSsoPlugin } from "./plugins/reside-sso-plugin";
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -61,7 +60,6 @@ export const auth = betterAuth({
         await sendMagicLinkEmail({ to: email, url, variant });
       },
     }),
-    resideSsoPlugin(),
   ],
   advanced: {
     database: {

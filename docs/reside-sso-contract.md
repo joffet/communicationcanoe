@@ -1,8 +1,10 @@
 # reside → comm-canoe SSO token contract
 
-This is the handoff spec for the (separate, later) reside-side project that will issue these
-tokens. comm-canoe's side is already implemented against this contract; nothing here should
-change without updating `apps/web/src/lib/auth/reside-sso.ts` in lockstep.
+This is the historical one-click SSO contract. Release the
+[Reside issuer removal](https://github.com/joffet/reside/pull/1668) first.
+Once the issuer is absent across production hosts, allow at least five minutes
+for the last possible token to expire before releasing the exchange removal.
+Existing Better Auth sessions and magic-link sign-in use their existing flows.
 
 ## Token shape
 

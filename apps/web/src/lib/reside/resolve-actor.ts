@@ -1,17 +1,15 @@
 import { createAdminService } from "@communication-canoe/database";
 import type { ResideActorClaims } from "@communication-canoe/shared/schemas";
 import { auth, authPool } from "@/lib/auth/server";
-import { mapTenantRole } from "@/lib/auth/plugins/reside-sso-plugin";
 import type { ResideClientUid } from "@communication-canoe/database";
 
-/**
- * Phase 3's non-session counterpart to reside-sso-plugin.ts's inline
- * find-or-create - that logic lives inside a live createAuthEndpoint `ctx`
- * (ctx.context.adapter/internalAdapter) and can't be called from a plain API
- * route. resideUserId/resideClientUid are better-auth `additionalFields` on
- * its own "user" table (not the domain public.users table DomainService
- * models), so the lookup goes straight at that table via the auth pool.
- */
+function mapTenantRole(role?: "admin" | "user" | "super"): "admin" | "member" {
+  return role === "admin" || role === "super" ? "admin" : "member";
+}
+
+/** Reside's actor IDs are stored in Better Auth's user table rather than
+ * the domain public.users table. Resolve them through the auth pool without
+ * creating a browser session. */
 export async function findResideActorUserId(resideUserId: string): Promise<string | null> {
   const { rows } = await authPool.query<{ id: string }>(
     `SELECT id FROM "user" WHERE "resideUserId" = $1`,
@@ -41,8 +39,7 @@ export async function findResideUserIdsForUsers(userIds: string[]): Promise<Map<
 
 /**
  * Resolves a reside admin's comm-canoe platform user, creating one on first
- * contact. Mirrors invite-user.ts's proven no-session auth.api.createUser
- * call rather than the plugin's ctx-bound adapter calls. resideUserId is
+ * contact using the no-session auth.api.createUser. resideUserId is
  * declared `input: false` on the user schema, so it can't be set through
  * auth.api.createUser's public body - set via a direct follow-up update
  * instead, same as any other server-side-only field.
