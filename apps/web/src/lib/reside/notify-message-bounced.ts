@@ -8,7 +8,7 @@ const TIMEOUT_MS = 3000;
  * spam complaint, so reside can stamp notice receipts, notifications, and its
  * email_deliveries ledger.
  *
- * Best-effort, matching notify-message-opened.ts: never throws, and only called
+ * Best-effort: never throws, and only called
  * when comm-canoe already matched the SES message id to one of its messages.
  */
 export async function notifyResideMessageBounced(input: {
