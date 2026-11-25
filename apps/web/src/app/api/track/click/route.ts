@@ -4,7 +4,6 @@ import {
   verifyEmailClickToken,
   type EmailClickTokenPayload,
 } from "@communication-canoe/messaging";
-import { notifyResideMessageClicked } from "@/lib/reside/notify-message-clicked";
 
 /**
  * Records a click on a tracked link, by either of the two mechanisms
@@ -34,17 +33,7 @@ import { notifyResideMessageClicked } from "@/lib/reside/notify-message-clicked"
  */
 async function record(payload: EmailClickTokenPayload): Promise<void> {
   try {
-    const { firstClick } = await createDomainService().recordMessageClick(payload.messageId);
-    // Every click, not only the first - unlike the open pixel, which is
-    // re-fetched by image proxies and so is notified once. A click is a person
-    // choosing to go somewhere, and a notice with two buttons wants to know
-    // which one got pressed and how often.
-    await notifyResideMessageClicked({
-      messageId: payload.messageId,
-      url: payload.url,
-      clickedAt: new Date(),
-      firstClick,
-    });
+    await createDomainService().recordMessageClick(payload.messageId);
   } catch (err) {
     console.error("[track/click] failed to record click:", err);
   }
