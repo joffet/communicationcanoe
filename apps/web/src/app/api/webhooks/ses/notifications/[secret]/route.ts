@@ -1,6 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { type TenantId, createAdminService, createDomainService } from "@communication-canoe/database";
-import { notifyResideIdentityStatus } from "@/lib/reside/identity-status-client";
+import { type TenantId, createDomainService } from "@communication-canoe/database";
 
 type SesEvent = {
   eventType: "Delivery" | "Bounce" | "Complaint" | string;
@@ -66,7 +65,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ sec
       deliveryStatus: "delivered",
       deliveredAt: event.delivery?.timestamp ?? new Date().toISOString(),
     });
-    await recordOutcomeAndMaybeNotifyReside(domain, message, "success");
+    await recordOutcome(domain, message, "success");
   } else if (event.eventType === "Bounce") {
     const detail =
       event.bounce?.bouncedRecipients?.[0]?.diagnosticCode ??
@@ -79,7 +78,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ sec
     // Only hard (Permanent) bounces count toward the threshold - transient
     // bounces are likely to succeed on a later retry.
     if (event.bounce?.bounceType === "Permanent") {
-      await recordOutcomeAndMaybeNotifyReside(domain, message, "hard_failure");
+      await recordOutcome(domain, message, "hard_failure");
     }
   } else if (event.eventType === "Complaint") {
     await domain.updateMessageDeliveryStatus(message.id, {
@@ -88,15 +87,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ sec
     });
     // A spam complaint is at least as strong a signal to stop emailing this
     // address as a hard bounce.
-    await recordOutcomeAndMaybeNotifyReside(domain, message, "hard_failure");
+    await recordOutcome(domain, message, "hard_failure");
   }
 
   return new Response("OK", { status: 200 });
 }
 
-async function recordOutcomeAndMaybeNotifyReside(
+async function recordOutcome(
   domain: ReturnType<typeof createDomainService>,
-  message: { id: string; tenantId: TenantId; conversationId: string },
+  message: { tenantId: TenantId; conversationId: string },
   outcome: "success" | "hard_failure",
 ): Promise<void> {
   const thread = await domain.getConversationThread(message.conversationId);
@@ -105,24 +104,10 @@ async function recordOutcomeAndMaybeNotifyReside(
   const settings = await domain.getTenantSettings(message.tenantId);
   const threshold = settings?.bounceThreshold ?? 3;
 
-  const { crossedThreshold, clearedFlag } = await domain.recordChannelDeliveryOutcome(
+  await domain.recordChannelDeliveryOutcome(
     thread.identity.id,
     "email",
     outcome,
     threshold,
   );
-
-  if ((crossedThreshold || clearedFlag) && thread.identity.resideResidentId) {
-    // message.tenantId is comm-canoe's internal uuid; reside only recognises
-    // its own client uid, so translate before calling out.
-    const tenant = await createAdminService().getTenantById(message.tenantId);
-    if (!tenant) return;
-
-    await notifyResideIdentityStatus({
-      resideClientUid: tenant.resideClientUid,
-      resideResidentId: thread.identity.resideResidentId,
-      channel: "email",
-      status: crossedThreshold ? "undeliverable" : "deliverable",
-    });
-  }
 }
