@@ -1,7 +1,6 @@
 import twilio from "twilio";
-import { type TenantId, createAdminService, createDomainService } from "@communication-canoe/database";
+import { type TenantId, createDomainService } from "@communication-canoe/database";
 import type { MessageDeliveryStatus } from "@communication-canoe/database";
-import { notifyResideIdentityStatus } from "@/lib/reside/identity-status-client";
 
 function validateTwilioSignature(
   authToken: string,
@@ -73,17 +72,17 @@ export async function POST(request: Request) {
   });
 
   if (deliveryStatus === "delivered") {
-    await recordOutcomeAndMaybeNotifyReside(domain, message, "success");
+    await recordOutcome(domain, message, "success");
   } else if (deliveryStatus === "failed" || deliveryStatus === "undelivered") {
-    await recordOutcomeAndMaybeNotifyReside(domain, message, "hard_failure");
+    await recordOutcome(domain, message, "hard_failure");
   }
 
   return new Response("OK", { status: 200 });
 }
 
-async function recordOutcomeAndMaybeNotifyReside(
+async function recordOutcome(
   domain: ReturnType<typeof createDomainService>,
-  message: { id: string; tenantId: TenantId; conversationId: string },
+  message: { tenantId: TenantId; conversationId: string },
   outcome: "success" | "hard_failure",
 ): Promise<void> {
   const thread = await domain.getConversationThread(message.conversationId);
@@ -92,25 +91,10 @@ async function recordOutcomeAndMaybeNotifyReside(
   const settings = await domain.getTenantSettings(message.tenantId);
   const threshold = settings?.bounceThreshold ?? 3;
 
-  const { crossedThreshold, clearedFlag } = await domain.recordChannelDeliveryOutcome(
+  await domain.recordChannelDeliveryOutcome(
     thread.identity.id,
     "sms",
     outcome,
     threshold,
   );
-
-  if ((crossedThreshold || clearedFlag) && thread.identity.resideResidentId) {
-    // message.tenantId is comm-canoe's internal uuid; reside only recognises
-    // its own client uid, so translate before calling out (mirrors the SES
-    // bounce path in webhooks/ses/notifications).
-    const tenant = await createAdminService().getTenantById(message.tenantId);
-    if (!tenant) return;
-
-    await notifyResideIdentityStatus({
-      resideClientUid: tenant.resideClientUid,
-      resideResidentId: thread.identity.resideResidentId,
-      channel: "sms",
-      status: crossedThreshold ? "undeliverable" : "deliverable",
-    });
-  }
 }
