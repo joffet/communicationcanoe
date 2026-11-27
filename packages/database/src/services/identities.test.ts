@@ -504,6 +504,7 @@ describe("verified legacy erasure linkage", () => {
     const current = await domain.findOrCreateIdentity(tenant.id, { email: newEmail, resideResidentId: SUBJECT });
     const input = {
       resideResidentId: SUBJECT,
+      requireVerifiedLinkage: true,
       relatedResidentIds: [OLD],
       contactHashes: [identityContactHash(oldEmail), identityContactHash(newEmail)],
     };
@@ -524,7 +525,7 @@ describe("verified legacy erasure linkage", () => {
     const unknown = await domain.findOrCreateIdentity(tenant.id, { phone: "+14165550100" });
     await priv().mergeIdentities(tenant.id, claimant.id, old.id, "email");
     await priv().mergeIdentities(tenant.id, claimant.id, unknown.id, "phone");
-    expect(await domain.anonymizeIdentitiesWithStatus(tenant.id, { resideResidentId: OLD, contactHashes: [] }))
+    expect(await domain.anonymizeIdentitiesWithStatus(tenant.id, { resideResidentId: OLD, contactHashes: [], requireVerifiedLinkage: true }))
       .toEqual({ identitiesAnonymized: 1, identityConflicts: 2 });
     expect((await read(old.id)).anonymizedAt).not.toBeNull();
     expect((await read(claimant.id)).anonymizedAt).toBeNull();
@@ -549,6 +550,29 @@ describe("verified legacy erasure linkage", () => {
     expect(await read(existing.id)).toMatchObject({ verifiedResideResidentId: OLD, resideOwnershipConflict: true });
     expect(await domain.anonymizeIdentitiesWithStatus(tenant.id, { resideResidentId: OLD, contactHashes: [identityContactHash(oldEmail)] }))
       .toEqual({ identitiesAnonymized: 0, identityConflicts: 1 });
+  });
+
+  it("keeps recycled contact-only history for review even with no known competing owner", async () => {
+    const tenant = await makeTenant();
+    const history = await domain.findOrCreateIdentity(tenant.id, { email: oldEmail });
+    const request = { resideResidentId: NEW_OWNER, contactHashes: [identityContactHash(oldEmail)] };
+    expect(await domain.anonymizeIdentitiesWithStatus(tenant.id, { ...request, requireVerifiedLinkage: true }))
+      .toEqual({ identitiesAnonymized: 0, identityConflicts: 1 });
+    expect((await read(history.id)).anonymizedAt).toBeNull();
+
+    // Only the compatibility caller may still use a contact-only match.
+    expect(await domain.anonymizeIdentitiesWithStatus(tenant.id, request))
+      .toEqual({ identitiesAnonymized: 1, identityConflicts: 0 });
+  });
+
+  it("does not let a mutable-only exact resident ID authorize verified erasure", async () => {
+    const tenant = await makeTenant();
+    const history = await domain.findOrCreateIdentity(tenant.id, { email: oldEmail });
+    await domain.findOrCreateIdentity(tenant.id, { email: oldEmail, resideResidentId: NEW_OWNER });
+    expect(await domain.anonymizeIdentitiesWithStatus(tenant.id, {
+      resideResidentId: NEW_OWNER, contactHashes: [], requireVerifiedLinkage: true,
+    })).toEqual({ identitiesAnonymized: 0, identityConflicts: 1 });
+    expect((await read(history.id)).anonymizedAt).toBeNull();
   });
 
   it("does not allow an established identity to change its verified owner", async () => {

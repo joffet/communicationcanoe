@@ -97,6 +97,7 @@ type IdentityErasureInput = {
   resideResidentId?: string;
   relatedResidentIds?: string[];
   contactHashes: string[];
+  requireVerifiedLinkage?: boolean;
 };
 
 export class DomainService {
@@ -624,7 +625,10 @@ export class DomainService {
           // A mixed chain can still contain a clean, independently verified
           // old identity. Neither a contact nor a chain edge can extend the
           // deletion into an ambiguous or differently owned identity.
-          if (conflicted(row) || (hasConflict && !isAllowed(row.verifiedResideResidentId))) {
+          const verified = isAllowed(row.verifiedResideResidentId);
+          const mayScrub = !conflicted(row) &&
+            (verified || (!input.requireVerifiedLinkage && !hasConflict));
+          if (!mayScrub) {
             identityConflicts++;
           } else {
             idsToScrub.add(row.id);

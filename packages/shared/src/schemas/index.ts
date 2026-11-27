@@ -476,6 +476,8 @@ export const resideAnonymizeSubjectInputSchema = z.object({
   subject: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("resident"), resideResidentId: z.string().min(1), ...anonymizeLinkage }),
     z.object({ kind: z.literal("user"), resideUserId: z.string().min(1), ...anonymizeLinkage }),
+    z.object({ kind: z.literal("verified_resident"), resideResidentId: z.string().min(1), ...anonymizeLinkage }),
+    z.object({ kind: z.literal("verified_user"), resideUserId: z.string().min(1), ...anonymizeLinkage }),
   ]),
 });
 

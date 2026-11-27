@@ -7,13 +7,20 @@ Enriching a row found by phone or email keeps the legacy routing behavior
 without promoting that match to verified history. A distinct resident ID
 later supplied for the same row is evidence of conflict. Keep rename enabled.
 
-An erasure request may supply related IDs from Reside's recorded membership
-lineage. The eraser accepts the established ID match and the tenant's
-unconflicted contact-only fallback. A hash does not override an incompatible
-owner. When a merge chain has mixed ownership, only independently verified,
-unconflicted rows attributed to the erased subject are eligible. The endpoint
-returns a count of protected conflicts for review. A contact-only identity
-with no current hash or trusted linkage cannot be discovered automatically.
+The new `verified_resident` and `verified_user` requests may supply related
+IDs from Reside's recorded membership lineage. Only the immutable owner of
+an unconflicted row authorizes erasure. A contact hash, the mutable resident
+ID and merge edges locate candidates for review, including a recycled
+address with no remaining competing claimant. They never extend strict
+erasure into an unverified row. A contact-only identity with no current hash
+or trusted linkage cannot be discovered automatically.
+
+Legacy request kinds keep the existing exact-ID and contact-only lookup,
+guarded against observed ownership conflicts. This is transition
+compatibility and offers no history guarantee for unlinked contact-only
+rows. Older receivers reject the new kinds instead of applying the older
+rules to them. Retire legacy writes only after all callers use the new
+contract.
 
 ## Historical backfill
 
@@ -33,6 +40,7 @@ skipped for review. Do not fill gaps by broadening the contact-hash match.
 
 Apply the additive migration before building the new Comm-canoe receiver.
 The old erasure body remains valid. Once the receiver is live, apply Reside's
-additive queue migration and deploy the sender. No production backfill is
-required for this rollout. Measure independently verified historical coverage
-before considering removal of the rename bridge.
+additive queue migration and deploy the sender only after reviewing unverified coverage and assigning ownership of
+the review queue. Automatic strict erasure will deliberately defer unsupported
+history. Measure independently verified historical coverage before considering
+removal of the rename bridge.
