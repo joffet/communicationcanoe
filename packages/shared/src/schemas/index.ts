@@ -467,12 +467,17 @@ export const resideRenameIdentityInputSchema = z.object({
  * Contacts arrive only as hashes (lowercase hex SHA-256 of the normalized
  * value - see packages/database/src/anonymize.ts): reside has erased the values
  * themselves by the time a retry runs. */
-const contactHashesSchema = z.array(z.string().regex(/^[0-9a-f]{64}$/)).max(50);
+const anonymizeLinkage = {
+  contactHashes: z.array(z.string().regex(/^[0-9a-f]{64}$/)).max(50),
+  relatedResidentIds: z.array(z.string().min(1)).optional(),
+};
 export const resideAnonymizeSubjectInputSchema = z.object({
   tenantId: z.string().min(1).transform(asResideClientUid),
   subject: z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("resident"), resideResidentId: z.string().min(1), contactHashes: contactHashesSchema }),
-    z.object({ kind: z.literal("user"), resideUserId: z.string().min(1), contactHashes: contactHashesSchema }),
+    z.object({ kind: z.literal("resident"), resideResidentId: z.string().min(1), ...anonymizeLinkage }),
+    z.object({ kind: z.literal("user"), resideUserId: z.string().min(1), ...anonymizeLinkage }),
+    z.object({ kind: z.literal("verified_resident"), resideResidentId: z.string().min(1), ...anonymizeLinkage }),
+    z.object({ kind: z.literal("verified_user"), resideUserId: z.string().min(1), ...anonymizeLinkage }),
   ]),
 });
 

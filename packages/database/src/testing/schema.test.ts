@@ -16,13 +16,11 @@ afterAll(async () => {
 });
 
 /**
- * Counted against the live PlanetScale database after the first migration
- * applied. If pglite and PlanetScale disagree, either the migration files no
- * longer describe what production runs, or a migration was applied by hand -
- * both worth failing a build over, since the point of this harness is that the
- * schema under test is the schema that ships.
+ * The verified live PlanetScale baseline plus the trigger added by 0012.
+ * The harness must build exactly what production will have after every
+ * checked-in migration is applied.
  */
-const PRODUCTION_OBJECT_COUNTS = { tables: 23, enums: 14, fks: 53, triggers: 3 };
+const PRODUCTION_OBJECT_COUNTS = { tables: 23, enums: 14, fks: 53, triggers: 4 };
 
 
 /** Every NOT NULL column, so a fixture cannot drift from the real table
@@ -48,7 +46,7 @@ async function makeDocument(tenantId: TenantId) {
 }
 
 describe("schema parity with production", () => {
-  it("builds the same objects PlanetScale has", async () => {
+  it("builds the documented production schema after all migrations", async () => {
     const result = await db.execute<{
       tables: number; enums: number; fks: number; triggers: number;
     }>(sql`

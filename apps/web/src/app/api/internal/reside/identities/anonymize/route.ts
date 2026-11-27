@@ -31,12 +31,16 @@ export async function POST(request: Request) {
   // A user subject is the account; the inbox identity its member side wrote
   // under is matched by its contact hashes, which reside sends only when no
   // live member of the building still owns that identity.
-  const userAnonymized =
-    subject.kind === "user" ? await anonymizeResideUser(resideClientUid, subject.resideUserId) : false;
-  const identitiesAnonymized = await createDomainService().anonymizeIdentities(tenant.id, {
-    resideResidentId: subject.kind === "resident" ? subject.resideResidentId : undefined,
+  const userAnonymized = "resideUserId" in subject
+    ? await anonymizeResideUser(resideClientUid, subject.resideUserId)
+    : false;
+  const requireVerifiedLinkage = subject.kind === "verified_resident" || subject.kind === "verified_user";
+  const identityErasure = await createDomainService().anonymizeIdentitiesWithStatus(tenant.id, {
+    resideResidentId: "resideResidentId" in subject ? subject.resideResidentId : undefined,
     contactHashes: subject.contactHashes,
+    relatedResidentIds: subject.relatedResidentIds,
+    requireVerifiedLinkage,
   });
 
-  return Response.json({ identitiesAnonymized, userAnonymized });
+  return Response.json({ ...identityErasure, userAnonymized });
 }

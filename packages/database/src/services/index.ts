@@ -40,6 +40,7 @@ import {
   ANONYMIZED_RESIDENT_NAME,
   UUID_PATTERN,
   anonymizedIdentityEmail,
+  identityContactHash,
   identityContactHashSql,
 } from "../anonymize";
 import { notifyDashboardConversation } from "../realtime/notify";
@@ -91,6 +92,13 @@ function normalizeEmailSubject(subject: string): string {
   }
   return s.toLowerCase();
 }
+
+type IdentityErasureInput = {
+  resideResidentId?: string;
+  relatedResidentIds?: string[];
+  contactHashes: string[];
+  requireVerifiedLinkage?: boolean;
+};
 
 export class DomainService {
   #orm?: Db;
@@ -364,12 +372,8 @@ export class DomainService {
         await this.orm.update(identities).set({ name: contact.name }).where(eq(identities.id, existing.id));
         existing.name = contact.name;
       }
-      if (contact.resideResidentId && !existing.resideResidentId) {
-        await this.orm
-          .update(identities)
-          .set({ resideResidentId: contact.resideResidentId })
-          .where(eq(identities.id, existing.id));
-        existing.resideResidentId = contact.resideResidentId;
+      if (contact.resideResidentId) {
+        await this.recordResidentAttribution(tenantId, existing.id, contact.resideResidentId);
       }
       return this.getCanonicalIdentity(existing.id);
     }
@@ -393,6 +397,7 @@ export class DomainService {
         email: email ?? null,
         name: contact.name ?? null,
         resideResidentId: contact.resideResidentId ?? null,
+        verifiedResideResidentId: contact.resideResidentId ?? null,
       })
       .onConflictDoNothing()
       .returning();
@@ -403,7 +408,12 @@ export class DomainService {
     const winner =
       (phone ? await this.findIdentityByPhone(tenantId, phone) : null) ??
       (email ? await this.findIdentityByEmail(tenantId, email) : null);
-    if (winner) return this.getCanonicalIdentity(winner.id);
+    if (winner) {
+      if (contact.resideResidentId) {
+        await this.recordResidentAttribution(tenantId, winner.id, contact.resideResidentId);
+      }
+      return this.getCanonicalIdentity(winner.id);
+    }
 
     // Nothing inserted and nothing found. A conflict on a column neither
     // lookup covers - resideResidentId - is the only way here, and it means
@@ -413,6 +423,16 @@ export class DomainService {
     throw new Error(
       `findOrCreateIdentity: insert conflicted but no matching identity found (tenant ${tenantId})`,
     );
+  }
+
+  /** A contact match can enrich the legacy routing field, but it does not prove ownership of the identity's history. */
+  private async recordResidentAttribution(tenantId: TenantId, identityId: string, residentId: string) {
+    await this.orm.update(identities).set({
+      resideResidentId: sql`coalesce(${identities.resideResidentId}, ${residentId}::uuid)`,
+      resideOwnershipConflict: sql`${identities.resideOwnershipConflict}
+        or coalesce(${identities.resideResidentId} <> ${residentId}::uuid, false)
+        or coalesce(${identities.verifiedResideResidentId} <> ${residentId}::uuid, false)`,
+    }).where(and(eq(identities.tenantId, tenantId), eq(identities.id, identityId), isNull(identities.anonymizedAt)));
   }
 
   /**
@@ -542,17 +562,21 @@ export class DomainService {
    * Idempotent: a scrubbed row has anonymized_at set, placeholder contacts and
    * no resident id, so a repeat call matches nothing and returns 0.
    */
-  async anonymizeIdentities(
-    tenantId: TenantId,
-    input: { resideResidentId?: string; contactHashes: string[] },
-  ): Promise<number> {
-    const residentId =
-      input.resideResidentId && UUID_PATTERN.test(input.resideResidentId) ? input.resideResidentId : null;
+  async anonymizeIdentities(tenantId: TenantId, input: IdentityErasureInput): Promise<number> {
+    return (await this.anonymizeIdentitiesWithStatus(tenantId, input)).identitiesAnonymized;
+  }
+
+  async anonymizeIdentitiesWithStatus(tenantId: TenantId, input: IdentityErasureInput) {
+    const residentIds = [...new Set([input.resideResidentId, ...(input.relatedResidentIds ?? [])]
+      .filter((id): id is string => Boolean(id && UUID_PATTERN.test(id)))
+      .map((id) => id.toLowerCase()))];
     const hashes = input.contactHashes;
-    if (!residentId && hashes.length === 0) return 0;
+    if (residentIds.length === 0 && hashes.length === 0) return { identitiesAnonymized: 0, identityConflicts: 0 };
 
     return this.orm.transaction(async (tx) => {
-      const byResident = residentId ? sql`${identities.resideResidentId} = ${residentId}::uuid` : sql`false`;
+      const byResident = residentIds.length
+        ? sql`(${inArray(identities.verifiedResideResidentId, residentIds)} or ${inArray(identities.resideResidentId, residentIds)})`
+        : sql`false`;
       const byHash = hashes.length
         ? sql`(${inArray(identityContactHashSql(identities.email), hashes)} or ${inArray(identityContactHashSql(identities.phone), hashes)})`
         : sql`false`;
@@ -564,28 +588,55 @@ export class DomainService {
           isNull(identities.anonymizedAt),
           sql`(${byResident} or ${byHash})`,
         ));
-      if (matches.length === 0) return 0;
+      if (matches.length === 0) return { identitiesAnonymized: 0, identityConflicts: 0 };
 
-      const chained = new Set<string>();
+      const idsToScrub = new Set<string>();
+      const examined = new Set<string>();
+      let identityConflicts = 0;
+      const isAllowed = (id: string | null) => id !== null && residentIds.includes(id);
       for (const { id } of matches) {
+        if (examined.has(id)) continue;
         const result = (await tx.execute(
-          sql`SELECT * FROM identity_merge_chain_ids(${id}::uuid)`,
-        )) as { rows: Array<{ identity_merge_chain_ids: string }> };
-        for (const row of result.rows) chained.add(row.identity_merge_chain_ids);
-      }
-      // The chain function walks merged_into_id without looking at tenants.
-      // A merge never crosses one, but this is the place that would make it
-      // matter, so the set is narrowed to this tenant again here.
-      const scoped = await tx
-        .select({ id: identities.id })
-        .from(identities)
-        .where(and(
+          sql`SELECT identity_merge_chain_ids(${id}::uuid) AS id`,
+        )) as { rows: { id: string }[] };
+        // Lock the tenant-local rows and recheck ownership before scrubbing.
+        // A foreign tenant row is never a candidate, even in a corrupt chain.
+        const chain = await tx.select({
+          id: identities.id,
+          email: identities.email,
+          phone: identities.phone,
+          resideResidentId: identities.resideResidentId,
+          verifiedResideResidentId: identities.verifiedResideResidentId,
+          resideOwnershipConflict: identities.resideOwnershipConflict,
+        }).from(identities).where(and(
           eq(identities.tenantId, tenantId),
-          inArray(identities.id, [...chained]),
+          inArray(identities.id, result.rows.map((row) => row.id)),
           isNull(identities.anonymizedAt),
-        ));
-      const ids = scoped.map((row) => row.id);
-      if (ids.length === 0) return 0;
+        )).orderBy(identities.id).for("update");
+        for (const row of chain) examined.add(row.id);
+        const conflicted = (row: typeof chain[number]) => row.resideOwnershipConflict ||
+          [row.resideResidentId, row.verifiedResideResidentId].some((owner) => owner !== null && !isAllowed(owner));
+        const hasSeed = chain.some((row) => isAllowed(row.resideResidentId) || isAllowed(row.verifiedResideResidentId) ||
+          (row.email !== null && hashes.includes(identityContactHash(row.email))) ||
+          (row.phone !== null && hashes.includes(identityContactHash(row.phone))));
+        if (!hasSeed) continue;
+        const hasConflict = chain.some(conflicted);
+        for (const row of chain) {
+          // A mixed chain can still contain a clean, independently verified
+          // old identity. Neither a contact nor a chain edge can extend the
+          // deletion into an ambiguous or differently owned identity.
+          const verified = isAllowed(row.verifiedResideResidentId);
+          const mayScrub = !conflicted(row) &&
+            (verified || (!input.requireVerifiedLinkage && !hasConflict));
+          if (!mayScrub) {
+            identityConflicts++;
+          } else {
+            idsToScrub.add(row.id);
+          }
+        }
+      }
+      const ids = [...idsToScrub];
+      if (ids.length === 0) return { identitiesAnonymized: 0, identityConflicts };
 
       const now = new Date();
       for (const id of ids) {
@@ -596,6 +647,7 @@ export class DomainService {
             email: anonymizedIdentityEmail(id),
             phone: null,
             resideResidentId: null,
+            verifiedResideResidentId: null,
             emailConsecutiveFailures: 0,
             phoneConsecutiveFailures: 0,
             emailFlaggedAt: null,
@@ -617,9 +669,11 @@ export class DomainService {
       const conversationIds = new Set<string>();
       for (const { id } of owned) {
         const result = (await tx.execute(
-          sql`SELECT * FROM conversation_merge_chain_ids(${id}::uuid)`,
-        )) as { rows: Array<{ conversation_merge_chain_ids: string }> };
-        for (const row of result.rows) conversationIds.add(row.conversation_merge_chain_ids);
+          sql`SELECT c.id FROM conversation_merge_chain_ids(${id}::uuid) AS chain(id)
+            JOIN ${conversationsTable} c ON c.id = chain.id
+            WHERE c.tenant_id = ${tenantId} AND c.identity_id IN (${sql.join(ids.map((identityId) => sql`${identityId}::uuid`), sql`, `)})`,
+        )) as { rows: { id: string }[] };
+        for (const row of result.rows) conversationIds.add(row.id);
       }
 
       if (conversationIds.size > 0) {
@@ -636,7 +690,9 @@ export class DomainService {
       }
 
       const recipientMatch = [
-        residentId ? sql`${outboundBatchRecipients.identityContact}->>'resideResidentId' = ${residentId}` : null,
+        residentIds.length
+          ? sql`${outboundBatchRecipients.identityContact}->>'resideResidentId' in (${sql.join(residentIds.map((id) => sql`${id}`), sql`, `)})`
+          : null,
         conversationIds.size > 0
           ? sql`${outboundBatchRecipients.messageId} in (select ${messages.id} from ${messages} where ${inArray(messages.conversationId, [...conversationIds])})`
           : null,
@@ -653,7 +709,7 @@ export class DomainService {
           ));
       }
 
-      return ids.length;
+      return { identitiesAnonymized: ids.length, identityConflicts };
     });
   }
 
