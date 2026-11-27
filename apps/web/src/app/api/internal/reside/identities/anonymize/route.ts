@@ -33,10 +33,11 @@ export async function POST(request: Request) {
   // live member of the building still owns that identity.
   const userAnonymized =
     subject.kind === "user" ? await anonymizeResideUser(resideClientUid, subject.resideUserId) : false;
-  const identitiesAnonymized = await createDomainService().anonymizeIdentities(tenant.id, {
+  const identityErasure = await createDomainService().anonymizeIdentitiesWithStatus(tenant.id, {
     resideResidentId: subject.kind === "resident" ? subject.resideResidentId : undefined,
     contactHashes: subject.contactHashes,
+    relatedResidentIds: subject.relatedResidentIds,
   });
 
-  return Response.json({ identitiesAnonymized, userAnonymized });
+  return Response.json({ ...identityErasure, userAnonymized });
 }

@@ -400,6 +400,10 @@ export const identities = pgTable(
     ),
     /** 20250625090000 — cross-system link to a reside resident record */
     resideResidentId: uuid("reside_resident_id"),
+    /** The explicit resident attribution at identity creation, or one proved by historical evidence. */
+    verifiedResideResidentId: uuid("verified_reside_resident_id"),
+    /** Observed different resident attributions on the same identity. Cannot safely split its records. */
+    resideOwnershipConflict: boolean("reside_ownership_conflict").notNull().default(false),
     /** 20250701000200 (bounce-threshold tracking) */
     emailConsecutiveFailures: integer("email_consecutive_failures")
       .notNull()
@@ -458,6 +462,9 @@ export const identities = pgTable(
     index("identities_merged_into_idx")
       .on(t.mergedIntoId)
       .where(sql`${t.mergedIntoId} is not null`),
+    index("identities_tenant_verified_resident_idx")
+      .on(t.tenantId, t.verifiedResideResidentId)
+      .where(sql`${t.verifiedResideResidentId} is not null`),
     /** 20250625090000 */
     uniqueIndex("identities_tenant_reside_resident_unique")
       .on(t.tenantId, t.resideResidentId)

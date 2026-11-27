@@ -3,6 +3,7 @@ import { DomainService } from "./index";
 import { createTestDb, resetTestDb, type TestDb } from "../testing/pglite";
 import { conversations, identities, identityConversionLogs, messages, outboundBatchRecipients, tenants } from "../schema";
 import { identityContactHash } from "../anonymize";
+import { backfillVerifiedIdentityLinkage } from "./verified-identity-backfill";
 import { eq } from "drizzle-orm";
 import { asResideClientUid } from "@communication-canoe/shared/brands";
 
@@ -374,7 +375,7 @@ describe("anonymizeIdentities", () => {
 
   it("matches by email hash alone", async () => {
     const tenant = await makeTenant();
-    const { identity } = await seedPerson(tenant.id);
+    const identity = await domain.findOrCreateIdentity(tenant.id, { email: "ada@example.test" });
 
     expect(await domain.anonymizeIdentities(tenant.id, { contactHashes: [hashOf("ada@example.test")] })).toBe(1);
     const [row] = await db.select().from(identities).where(eq(identities.id, identity.id));
@@ -383,7 +384,7 @@ describe("anonymizeIdentities", () => {
 
   it("matches by phone hash alone", async () => {
     const tenant = await makeTenant();
-    const { identity } = await seedPerson(tenant.id);
+    const identity = await domain.findOrCreateIdentity(tenant.id, { phone: "+14165551111" });
 
     expect(await domain.anonymizeIdentities(tenant.id, { contactHashes: [hashOf("+14165551111")] })).toBe(1);
     const [row] = await db.select().from(identities).where(eq(identities.id, identity.id));
@@ -476,5 +477,93 @@ describe("anonymizeIdentities", () => {
     expect(old.phone).toBeNull();
     expect(old.name).toBe("Deleted resident");
     expect(await domain.findIdentityForContact(tenant.id, { phone: "+14165551111" })).toMatchObject({ id: fresh.id });
+  });
+});
+
+describe("verified legacy erasure linkage", () => {
+  const OLD = "77777777-7777-4777-8777-777777777777";
+  const SUBJECT = "88888888-8888-4888-8888-888888888888";
+  const NEW_OWNER = "99999999-9999-4999-8999-999999999999";
+  const oldEmail = "previous@fixture.test";
+  const newEmail = "current@fixture.test";
+  const read = async (id: string) => (await db.select().from(identities).where(eq(identities.id, id)))[0]!;
+
+  it("erases an attested old identity by predecessor UUID and leaves the new owner's identity and other tenant intact", async () => {
+    const tenant = await makeTenant();
+    const other = await makeTenant("2");
+    const old = await domain.findOrCreateIdentity(tenant.id, { email: oldEmail });
+    const unrelated = await domain.findOrCreateIdentity(other.id, { email: oldEmail, resideResidentId: OLD });
+    const attestations = [{ identityId: old.id, residentId: OLD }];
+    expect(await backfillVerifiedIdentityLinkage(db, tenant.id, attestations)).toMatchObject({ eligible: 1, applied: 0 });
+    expect(await backfillVerifiedIdentityLinkage(db, tenant.id, attestations, true)).toMatchObject({ eligible: 1, applied: 1 });
+    expect(await backfillVerifiedIdentityLinkage(db, tenant.id, attestations, true)).toMatchObject({ alreadyLinked: 1, applied: 0 });
+
+    // The old address was released before another identity was established.
+    await db.update(identities).set({ email: "other-old-address@fixture.test" }).where(eq(identities.id, old.id));
+    const reassigned = await domain.findOrCreateIdentity(tenant.id, { email: oldEmail, resideResidentId: NEW_OWNER });
+    const current = await domain.findOrCreateIdentity(tenant.id, { email: newEmail, resideResidentId: SUBJECT });
+    const input = {
+      resideResidentId: SUBJECT,
+      relatedResidentIds: [OLD],
+      contactHashes: [identityContactHash(oldEmail), identityContactHash(newEmail)],
+    };
+    const results = await Promise.all([
+      domain.anonymizeIdentitiesWithStatus(tenant.id, input),
+      domain.anonymizeIdentitiesWithStatus(tenant.id, input),
+    ]);
+    expect(results.reduce((sum, result) => sum + result.identitiesAnonymized, 0)).toBe(2);
+    expect(results.every((result) => result.identityConflicts === 1)).toBe(true);
+    for (const identity of [old, current]) expect((await read(identity.id)).anonymizedAt).not.toBeNull();
+    for (const identity of [reassigned, unrelated]) expect((await read(identity.id)).anonymizedAt).toBeNull();
+  });
+
+  it("still scrubs a verified old row in a mixed merge without touching the conflicting or unattributed rows", async () => {
+    const tenant = await makeTenant();
+    const old = await domain.findOrCreateIdentity(tenant.id, { email: oldEmail, resideResidentId: OLD });
+    const claimant = await domain.findOrCreateIdentity(tenant.id, { email: newEmail, resideResidentId: NEW_OWNER });
+    const unknown = await domain.findOrCreateIdentity(tenant.id, { phone: "+14165550100" });
+    await priv().mergeIdentities(tenant.id, claimant.id, old.id, "email");
+    await priv().mergeIdentities(tenant.id, claimant.id, unknown.id, "phone");
+    expect(await domain.anonymizeIdentitiesWithStatus(tenant.id, { resideResidentId: OLD, contactHashes: [] }))
+      .toEqual({ identitiesAnonymized: 1, identityConflicts: 2 });
+    expect((await read(old.id)).anonymizedAt).not.toBeNull();
+    expect((await read(claimant.id)).anonymizedAt).toBeNull();
+    expect((await read(unknown.id)).anonymizedAt).toBeNull();
+  });
+
+  it("does not convert a current contact match into verified historical ownership", async () => {
+    const tenant = await makeTenant();
+    const legacy = await domain.findOrCreateIdentity(tenant.id, { email: oldEmail });
+    await domain.findOrCreateIdentity(tenant.id, { email: oldEmail, resideResidentId: NEW_OWNER });
+    expect(await read(legacy.id)).toMatchObject({ resideResidentId: NEW_OWNER, verifiedResideResidentId: null });
+    expect(await backfillVerifiedIdentityLinkage(db, tenant.id, [{ identityId: legacy.id, residentId: OLD }], true))
+      .toMatchObject({ conflictingOrMerged: 1, applied: 0, unverified: 1 });
+    expect(await domain.anonymizeIdentitiesWithStatus(tenant.id, { resideResidentId: OLD, contactHashes: [identityContactHash(oldEmail)] }))
+      .toEqual({ identitiesAnonymized: 0, identityConflicts: 1 });
+  });
+
+  it("blocks exact and hash fallback after different resident attributions are observed on a reused row", async () => {
+    const tenant = await makeTenant();
+    const existing = await domain.findOrCreateIdentity(tenant.id, { email: oldEmail, resideResidentId: OLD });
+    await domain.findOrCreateIdentity(tenant.id, { email: oldEmail, resideResidentId: NEW_OWNER });
+    expect(await read(existing.id)).toMatchObject({ verifiedResideResidentId: OLD, resideOwnershipConflict: true });
+    expect(await domain.anonymizeIdentitiesWithStatus(tenant.id, { resideResidentId: OLD, contactHashes: [identityContactHash(oldEmail)] }))
+      .toEqual({ identitiesAnonymized: 0, identityConflicts: 1 });
+  });
+
+  it("does not allow an established identity to change its verified owner", async () => {
+    const tenant = await makeTenant();
+    const old = await domain.findOrCreateIdentity(tenant.id, { email: oldEmail, resideResidentId: OLD });
+    const attempt = db.update(identities).set({ verifiedResideResidentId: NEW_OWNER }).where(eq(identities.id, old.id));
+    await expect(attempt).rejects.toThrow();
+    expect((await read(old.id)).verifiedResideResidentId).toBe(OLD);
+  });
+
+  it("keeps an unverified old contact without an exact ID or historical attestation unresolved", async () => {
+    const tenant = await makeTenant();
+    const unknown = await domain.findOrCreateIdentity(tenant.id, { email: oldEmail });
+    expect(await domain.anonymizeIdentities(tenant.id, { resideResidentId: SUBJECT, contactHashes: [identityContactHash(newEmail)] })).toBe(0);
+    expect((await read(unknown.id)).anonymizedAt).toBeNull();
+    expect(await backfillVerifiedIdentityLinkage(db, tenant.id, [])).toMatchObject({ applied: 0, unverified: 1 });
   });
 });

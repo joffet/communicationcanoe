@@ -141,7 +141,7 @@ describe("tenant scoping census", () => {
     // cross-tenant maintenance by design, like
     // reclaimStuckOutboundBatchRecipients, not an unscoped read of one
     // tenant's row.
-    expect(methods.length).toBe(103);
+    expect(methods.length).toBe(104);
     expect(methods.map((m) => m.name)).toContain("getConversationsForTenant");
   });
 
